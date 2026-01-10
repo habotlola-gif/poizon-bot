@@ -19,9 +19,9 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 
-# ===== КАТЕГОРИИ И КЛЮЧЕВЫЕ СЛОВА =====
+# ===== КАТЕГОРИИ (БЕЗ БРЕНДОВ) =====
 CATEGORIES = {
-    '👟 Обувь': ['кроссовки', 'кросс', 'nike', 'jordan', 'adidas', 'yeezy', 'пума', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk', 'new balance'],
+    '👟 Обувь': ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk'],
     '🧥 Верхняя одежда': ['куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'hoodie', 'худи', 'толстовка', 'свитшот', 'кофта'],
     '👕 Одежда': ['футболка', 'майка', 'шорты', 'джинсы', 'брюки', 'штаны', 'рубашка', 'shirt', 'pants', 'jeans', 'tshirt', 'tee', 'polo', 'свитер'],
     '👜 Сумки': ['сумка', 'рюкзак', 'сумочка', 'клатч', 'кошелек', 'портмоне', 'bag', 'backpack', 'wallet', 'crossbody', 'messenger', 'поясная'],
@@ -67,14 +67,39 @@ products_db = []
 
 # ===== ФУНКЦИИ =====
 def detect_category(text):
-    """Автоопределение категории по ключевым словам"""
+    """Автоопределение категории с приоритетом"""
     text_lower = text.lower()
-    for category, keywords in CATEGORIES.items():
-        if category == '🎒 Другое':
-            continue
-        for keyword in keywords:
-            if keyword in text_lower:
-                return category
+    
+    # ПРИОРИТЕТ 1: Верхняя одежда (проверяем ПЕРВОЙ)
+    for keyword in ['худи', 'hoodie', 'толстовка', 'свитшот', 'куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'кофта']:
+        if keyword in text_lower:
+            return '🧥 Верхняя одежда'
+    
+    # ПРИОРИТЕТ 2: Одежда
+    for keyword in ['футболка', 'майка', 'шорты', 'джинсы', 'брюки', 'штаны', 'рубашка', 'shirt', 'pants', 'jeans', 'tshirt', 'tee', 'polo', 'свитер']:
+        if keyword in text_lower:
+            return '👕 Одежда'
+    
+    # ПРИОРИТЕТ 3: Обувь
+    for keyword in ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk']:
+        if keyword in text_lower:
+            return '👟 Обувь'
+    
+    # ПРИОРИТЕТ 4: Сумки
+    for keyword in ['сумка', 'рюкзак', 'сумочка', 'клатч', 'кошелек', 'портмоне', 'bag', 'backpack', 'wallet', 'crossbody', 'messenger', 'поясная']:
+        if keyword in text_lower:
+            return '👜 Сумки'
+    
+    # ПРИОРИТЕТ 5: Аксессуары
+    for keyword in ['часы', 'браслет', 'цепь', 'кольцо', 'серьги', 'очки', 'кепка', 'шапка', 'перчатки', 'ремень', 'носки', 'watch', 'belt', 'cap', 'hat', 'glasses', 'chain', 'подвеска']:
+        if keyword in text_lower:
+            return '⌚️ Аксессуары'
+    
+    # ПРИОРИТЕТ 6: Косметика
+    for keyword in ['крем', 'помада', 'тушь', 'духи', 'парфюм', 'маска', 'сыворотка', 'тональ', 'пудра', 'лак', 'лосьон', 'косметика', 'perfume', 'cream', 'serum', 'lipstick', 'блеск']:
+        if keyword in text_lower:
+            return '💄 Косметика'
+    
     return '🎒 Другое'
 
 def load_products():
@@ -170,7 +195,7 @@ def paginate_products(products, page=0, category='all'):
     kb.append([InlineKeyboardButton(text="🔙 Категории", callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=kb), len(filtered)
 
-# ===== ПАРСЕР (ИСПРАВЛЕННЫЙ) =====
+# ===== ПАРСЕР =====
 @router.channel_post()
 async def auto_parse(message: Message):
     try:
@@ -185,20 +210,20 @@ async def auto_parse(message: Message):
     
     text = message.caption or ""
     
-    # ===== УЛУЧШЕННЫЙ ПАРСИНГ ЦЕНЫ =====
+    # Парсинг цены
     price = "Цена в ЛС"
     
-    # Вариант 1: Цена с символами (4653₽, 4 653 руб, $50)
+    # Вариант 1: Цена с символами (4653₽, 4 653 руб)
     match1 = re.search(r'(\d[\d\s]+?)\s*[₽руб$RUB]', text, re.IGNORECASE)
     if match1:
         price = match1.group(1).replace(' ', '')
     else:
-        # Вариант 2: "Цена: 5000", "цена - 3500"
+        # Вариант 2: "Цена: 5000"
         match2 = re.search(r'цена[\s\-:]+(\d[\d\s]+)', text, re.IGNORECASE)
         if match2:
             price = match2.group(1).replace(' ', '')
         else:
-            # Вариант 3: Просто число 3+ цифры
+            # Вариант 3: Просто число
             match3 = re.search(r'\b(\d{3,})\b', text)
             if match3:
                 price = match3.group(1)
@@ -207,7 +232,7 @@ async def auto_parse(message: Message):
     lines = text.split('\n')
     title = lines[0][:60].strip() if lines and len(lines[0]) > 5 else text[:60].strip() or f"Товар #{message.message_id}"
     
-    # Категория
+    # Категория (с приоритетом)
     category = detect_category(text)
     
     try:
@@ -227,7 +252,10 @@ async def auto_parse(message: Message):
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
-        f"👋 POIZON LAB\n\n📦 Товаров: {len(products_db)}\n🔄 Канал: {CHANNEL_ID}\n\nВыберите:",
+        f"👋 Добро пожаловать в POIZON LAB!\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
+        f"🔄 Автокаталог: {CHANNEL_ID}\n\n"
+        f"Выберите действие:",
         reply_markup=main_menu()
     )
 
@@ -238,7 +266,9 @@ async def cmd_admin(message: Message):
     cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
     new = cursor.fetchone()[0]
     await message.answer(
-        f"🔐 Админ-панель\n\n📦 Товаров: {len(products_db)}\n🆕 Заказов: {new}",
+        f"🔐 Админ-панель POIZON LAB\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
+        f"🆕 Новых заказов: {new}",
         reply_markup=admin_menu()
     )
 
@@ -255,7 +285,9 @@ async def show_catalog(callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        f"📦 Каталог ({len(products_db)} товаров)\n\nВыберите категорию:",
+        f"📦 Каталог POIZON LAB\n\n"
+        f"Всего товаров: {len(products_db)}\n\n"
+        f"Выберите категорию:",
         reply_markup=catalog_categories()
     )
 
@@ -272,8 +304,11 @@ async def show_category(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("page_"))
 async def paginate(callback: CallbackQuery):
-    _, category, page = callback.data.split("_", 2)
-    kb, total = paginate_products(products_db, int(page), category)
+    parts = callback.data.split("_")
+    page = int(parts[-1])
+    category = "_".join(parts[1:-1])
+    
+    kb, total = paginate_products(products_db, page, category)
     
     cat_name = category if category != 'all' else 'Все товары'
     await callback.message.edit_text(
@@ -294,7 +329,7 @@ async def show_product(callback: CallbackQuery):
         await callback.answer("❌ Товар не найден", show_alert=True)
         return
     
-    text = f"🛍 {p['name']}\n\n{p['description']}\n\n💰 {format_price(p['price'])} ₽\n\n{p.get('category', '🎒 Другое')}"
+    text = f"🛍 {p['name']}\n\n{p['description']}\n\n💰 Цена: {format_price(p['price'])} ₽\n\n📁 {p.get('category', '🎒 Другое')}"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Заказать", callback_data=f"buy_{pid}")],
@@ -358,7 +393,10 @@ async def admin_products(callback: CallbackQuery):
         kb.append([InlineKeyboardButton(text=f"{cat} ({count})", callback_data=f"admincat_{cat}")])
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
     
-    await callback.message.edit_text("📦 Управление товарами\n\nВыберите категорию:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await callback.message.edit_text(
+        "📦 Управление товарами\n\nВыберите категорию для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @router.callback_query(F.data.startswith("admincat_"))
 async def admin_category(callback: CallbackQuery):
@@ -373,7 +411,12 @@ async def admin_category(callback: CallbackQuery):
         kb.append([InlineKeyboardButton(text=f"❌ {p['name'][:30]}", callback_data=f"del_{p['id']}")])
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_products")])
     
-    await callback.message.edit_text(f"{category} ({len(products)})\n\nНажмите ❌ для удаления:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await callback.message.edit_text(
+        f"📦 {category}\n\n"
+        f"Товаров: {len(products)}\n\n"
+        f"Нажмите ❌ для удаления:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @router.callback_query(F.data.startswith("del_"))
 async def delete_product(callback: CallbackQuery):
@@ -386,7 +429,10 @@ async def delete_product(callback: CallbackQuery):
     load_products()
     
     await callback.answer("✅ Товар удален!", show_alert=True)
-    await callback.message.edit_text("✅ Товар удален из каталога", reply_markup=admin_menu())
+    await callback.message.edit_text(
+        "✅ Товар успешно удален из каталога!",
+        reply_markup=admin_menu()
+    )
 
 @router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
@@ -395,7 +441,9 @@ async def admin_back(callback: CallbackQuery):
     cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
     new = cursor.fetchone()[0]
     await callback.message.edit_text(
-        f"🔐 Админ-панель\n\n📦 Товаров: {len(products_db)}\n🆕 Заказов: {new}",
+        f"🔐 Админ-панель POIZON LAB\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
+        f"🆕 Новых заказов: {new}",
         reply_markup=admin_menu()
     )
 
@@ -406,7 +454,10 @@ async def admin_stats(callback: CallbackQuery):
     cursor.execute("SELECT COUNT(*) FROM orders")
     total = cursor.fetchone()[0]
     
-    stats_text = f"📊 Статистика POIZON LAB\n\n📦 Товаров: {len(products_db)}\n🛒 Заказов: {total}\n📱 Канал: {CHANNEL_ID}\n\n"
+    stats_text = f"📊 Статистика POIZON LAB\n\n"
+    stats_text += f"📦 Всего товаров: {len(products_db)}\n"
+    stats_text += f"🛒 Всего заказов: {total}\n"
+    stats_text += f"📱 Канал: {CHANNEL_ID}\n\n"
     stats_text += "Товары по категориям:\n"
     for cat in CATEGORIES.keys():
         count = len([p for p in products_db if p.get('category') == cat])
@@ -434,21 +485,25 @@ async def admin_orders(callback: CallbackQuery):
 # ===== ЗАКАЗ ПО ССЫЛКЕ =====
 @router.callback_query(F.data == "order_link")
 async def order_link(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🔗 Отправьте ссылку на товар:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")]
-    ]))
+    await callback.message.edit_text(
+        "🔗 Заказ по ссылке\n\n"
+        "Отправьте ссылку на товар с сайта POIZON:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")]
+        ])
+    )
     await state.set_state(OrderLink.waiting_for_link)
 
 @router.message(OrderLink.waiting_for_link)
 async def link(message: Message, state: FSMContext):
     await state.update_data(link=message.text)
-    await message.answer("📏 Укажите размер:")
+    await message.answer("📏 Укажите размер товара:")
     await state.set_state(OrderLink.waiting_for_size)
 
 @router.message(OrderLink.waiting_for_size)
 async def size(message: Message, state: FSMContext):
     await state.update_data(size=message.text)
-    await message.answer("💬 Добавьте комментарий:")
+    await message.answer("💬 Добавьте комментарий к заказу:")
     await state.set_state(OrderLink.waiting_for_comment)
 
 @router.message(OrderLink.waiting_for_comment)
@@ -477,7 +532,7 @@ async def comment(message: Message, state: FSMContext):
         f"✅ Заказ #{order_id} принят!\n\n"
         f"📏 Размер: {data['size']}\n"
         f"💬 {message.text}\n\n"
-        f"⏳ Менеджер рассчитает стоимость!",
+        f"⏳ Менеджер рассчитает стоимость и свяжется с вами!",
         reply_markup=main_menu()
     )
     await state.clear()
@@ -494,7 +549,7 @@ async def support(callback: CallbackQuery):
         f"💬 Техподдержка POIZON LAB\n\n"
         f"📞 Менеджер: @{admin_username}\n"
         f"⏰ Время работы: 24/7\n"
-        f"⚡️ Ответ в течение 5 минут",
+        f"⚡️ Среднее время ответа: 5 минут",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
         ])
@@ -512,7 +567,7 @@ async def main():
     print("🤖 POIZON LAB БОТ ЗАПУЩЕН!")
     print(f"📱 Канал: {CHANNEL_ID}")
     print(f"📦 Товаров в базе: {len(products_db)}")
-    print(f"🔄 Парсер: АВТОМАТИЧЕСКИЙ")
+    print(f"🔄 Парсер: АВТОМАТИЧЕСКИЙ С ПРИОРИТЕТОМ КАТЕГОРИЙ")
     print("=" * 60)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
