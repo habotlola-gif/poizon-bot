@@ -12,34 +12,29 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # Конфигурация
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
-CHANNEL_ID = "@poizonlab2"
+CHANNEL_ID = "@asdasdadsads123312"  # ✅ НОВЫЙ КАНАЛ
 
-# Инициализация бота и БД
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 
-# 🗄️ SQLite БАЗА ДАННЫХ (автоматически создается)
+# 🗄️ БАЗА ДАННЫХ
 conn = sqlite3.connect('poizon_bot.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Создание таблиц БД
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS products (
+cursor.execute('''CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
+    name TEXT,
     description TEXT,
     price TEXT,
     photo TEXT,
     source TEXT,
     post_id INTEGER UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-''')
+)''')
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS orders (
+cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     username TEXT,
@@ -49,44 +44,35 @@ CREATE TABLE IF NOT EXISTS orders (
     type TEXT,
     status TEXT DEFAULT 'new',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-''')
+)''')
 conn.commit()
 
-# Глобальные перемены
 products_db = []
 CHANNEL_POSTS = set()
-PARSER_DELAY = 600  # 10 минут по умолчанию
+PARSER_DELAY = 600
 
 def load_products():
-    """Загрузка товаров из БД"""
     global products_db
     cursor.execute('SELECT * FROM products ORDER BY created_at DESC')
-    products_db = [{"id": row[0], **dict(zip(['name','description','price','photo','source','post_id'], row[1:]))} 
-                   for row in cursor.fetchall()]
+    products_db = [{"id": row[0], **dict(zip(['name','description','price','photo','source','post_id'], row[1:]))} for row in cursor.fetchall()]
     return products_db
 
 def save_order(order_data):
-    """Сохранение заказа в БД"""
-    cursor.execute('''
-    INSERT INTO orders (user_id, username, full_name, product, price, type)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ''', (order_data['user_id'], order_data['username'], order_data['full_name'], 
-          order_data['product'], order_data['price'], order_data['type']))
+    cursor.execute('INSERT INTO orders (user_id, username, full_name, product, price, type) VALUES (?, ?, ?, ?, ?, ?)', 
+                   (order_data['user_id'], order_data['username'], order_data['full_name'], order_data['product'], order_data['price'], order_data['type']))
     conn.commit()
 
-def format_price(price: str) -> str:
-    """Форматирование цены"""
+def format_price(price):
     return re.sub(r'(\d)(?=(\d{3})+(?!\d))', r'\1 ', price.replace(' ', ''))
 
-load_products()  # Загружаем товары при старте
+load_products()
 
-# ===== КЛАВИАТУРЫ =====
+# Клавиатуры
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")],
-        [InlineKeyboardButton(text="🔗 Заказ по ссылке", callback_data="order_link")],
-        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")]
+        [InlineKeyboardButton(text="Каталог", callback_data="catalog")],
+        [InlineKeyboardButton(text="Заказ по ссылке", callback_data="order_link")],
+        [InlineKeyboardButton(text="Поддержка", callback_data="support")]
     ])
 
 def admin_menu():
@@ -97,270 +83,212 @@ def admin_menu():
         [InlineKeyboardButton(text="📦 Заказы", callback_data="admin_orders")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="🔄 Парсер канала", callback_data="parse_channel")],
-        [InlineKeyboardButton(text=f"⏱ Delay: {PARSER_DELAY}s", callback_data="admin_delay")],
-        [InlineKeyboardButton(text="◀️ Главное", callback_data="back_main")]
+        [InlineKeyboardButton(text=f"⏱ {PARSER_DELAY}s", callback_data="admin_delay")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")]
     ])
 
-# ===== АВТО-ПАРСЕР @poizonlab2 =====
-async def parse_poizonlab_channel():
-    """Парсит @poizonlab2 и добавляет товары в БД"""
+# 🔥 ПАРСЕР КАНАЛА (ИСПРАВЛЕН)
+async def parse_channel():
     global CHANNEL_POSTS
-    
     try:
         messages = await bot.get_chat_history(CHANNEL_ID, limit=20)
-        new_products = 0
+        new_count = 0
         
         for message in reversed(messages):
             if message.message_id in CHANNEL_POSTS:
                 continue
-                
-            if not (message.photo or message.caption):
+            
+            if not message.photo:
                 continue
             
-            text = (message.caption or message.text or "").lower()
+            text = message.caption or message.text or ""
             
-            # 🔍 Поиск цены (4653, 4 653, 4653₽, 4653руб)
-            price_match = re.search(r'(\d[\d\s]*?)(?=\s*(?:₽|руб|r|u|b|\*|№|$))', text)
+            # Цена
+            price_match = re.search(r'(\d[\d\s]*?)(?=\s*[₽руб$])', text)
             price = format_price(price_match.group(1)) if price_match else "Цена ДМ"
             
-            # 📝 Название товара
-            title = re.sub(r'цена.*?₽.*', '', text)[:80].strip()
-            if len(title) < 10:
-                title = f"POIZON LAB #{message.message_id}"
+            # Название
+            title = text.split('\n')[0][:60] if text else f"Товар #{message.message_id}"
             
-            # 💾 Сохраняем в БД (НЕ дублируем)
+            # ✅ САЙТ В БД БЕЗ \n
             cursor.execute('''
             INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id)
             VALUES (?, ?, ?, ?, ?, ?)
-            ''', (title, text[:300], price, 
-                  message.photo[-1].file_id if message.photo else None,
-                  'poizonlab2', message.message_id))
+            ''', (title, text[:250], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id))
+            
+            if cursor.rowcount > 0:
+                new_count += 1
             
             CHANNEL_POSTS.add(message.message_id)
-            new_products += cursor.rowcount
         
         conn.commit()
         load_products()
         
-        if new_products > 0:
-            await bot.send_message(ADMIN_ID, 
-                f"🆕 **Парсер @poizonlab2**\\n\\n"
-                f"✅ Добавлено **{new_products}** новых товаров!",
-                parse_mode="Markdown")
-            print(f"✅ +{new_products} товаров из канала")
-            
+        if new_count > 0:
+            await bot.send_message(ADMIN_ID, f"✅ +{new_count} товаров из {CHANNEL_ID}")
+        
+        print(f"Парсер: +{new_count} товаров")
+        
     except Exception as e:
-        print(f"❌ Парсер: {e}")
+        print(f"Парсер ошибка: {e}")
+        await bot.send_message(ADMIN_ID, f"❌ Парсер: {CHANNEL_ID} недоступен")
 
-async def auto_parse_channel():
-    """Авто-парсинг каждые PARSER_DELAY секунд"""
+async def auto_parser():
     global PARSER_DELAY
-    print(f"🔄 Авто-парсер запущен: каждые {PARSER_DELAY} сек")
     while True:
-        await parse_poizonlab_channel()
+        await parse_channel()
         await asyncio.sleep(PARSER_DELAY)
 
-# ===== КОМАНДЫ =====
+# Команды
 @router.message(Command("start"))
-async def cmd_start(message: Message):
-    stats = len(products_db)
+async def start(message: Message):
     await message.answer(
-        f"👋 **POIZON LAB Bot**\\n\\n"
-        f"🛍 **Авто-каталог** из @poizonlab2\\n"
-        f"📦 Товаров: **{stats}**\n\n"
-        f"Выберите действие:",
-        reply_markup=main_menu(), parse_mode="Markdown"
+        f"POIZON LAB\\n\\n"
+        f"Авто-каталог: {CHANNEL_ID}\\n"
+        f"Товаров: {len(products_db)}\\n\\n"
+        "Выберите:",
+        reply_markup=main_menu(), parse_mode="MarkdownV2"
     )
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message):
+async def admin(message: Message):
     if message.from_user.id != ADMIN_ID: return
-    
     cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
     new_orders = cursor.fetchone()[0]
-    
     await message.answer(
-        f"🔐 **Админ-панель**\\n\\n"
-        f"📦 Товаров: {len(products_db)}\\n"
-        f"🆕 Новых заказов: {new_orders}\\n"
-        f"⏱ Парсер: {PARSER_DELAY}с",
-        reply_markup=admin_menu(), parse_mode="Markdown"
+        f"Админ-панель\\n\\n"
+        f"Товаров: {len(products_db)}\\n"
+        f"Новых заказов: {new_orders}\\n"
+        f"Парсер: {PARSER_DELAY}с\\n"
+        f"Канал: {CHANNEL_ID}",
+        reply_markup=admin_menu(), parse_mode="MarkdownV2"
     )
 
 @router.message(Command("delay"))
-async def cmd_delay(message: Message):
-    """Настройка интервала парсера"""
+async def delay(message: Message):
     global PARSER_DELAY
-    
-    if message.from_user.id != ADMIN_ID:
-        return await message.answer("❌ Только админ!")
+    if message.from_user.id != ADMIN_ID: return
     
     try:
-        new_delay = int(message.text.split(maxsplit=1)[1])
-        if new_delay < 30:
-            return await message.answer("❌ Минимум 30 секунд!")
-        
+        new_delay = int(message.text.split()[1])
+        if new_delay < 30: raise ValueError()
         PARSER_DELAY = new_delay
+        await message.answer(f"✅ Интервал: {new_delay}с ({new_delay//60}м)")
+    except:
         await message.answer(
-            f"✅ **Интервал изменен!**\\n\\n"
-            f"⏱ **{PARSER_DELAY} сек** ({PARSER_DELAY//60} мин)",
-            parse_mode="Markdown"
-        )
-        print(f"⏱ Интервал: {PARSER_DELAY}с")
-        
-    except (IndexError, ValueError):
-        await message.answer(
-            f"📊 **Текущий интервал:** {PARSER_DELAY}с\\n\\n"
-            f"**Примеры:**\\n"
-            f"`/delay 60` — 1 минута\\n"
-            f"`/delay 300` — 5 минут\\n"
-            f"`/delay 1800` — 30 минут",
-            parse_mode="Markdown"
+            f"Текущий: {PARSER_DELAY}с\\n\\n"
+            "/delay 60  — 1 минута\\n"
+            "/delay 300 — 5 минут",
+            parse_mode="MarkdownV2"
         )
 
-# ===== КАТАЛОГ =====
+# Каталог
 @router.callback_query(F.data == "catalog")
-async def show_catalog(callback: CallbackQuery):
+async def catalog(callback: CallbackQuery):
     if not products_db:
         await callback.message.edit_text(
-            "📦 **Каталог пуст**\\n\\n"
-            "🔄 Ожидаем посты из @poizonlab2...",
+            "Каталог пуст\\n\\n🔄 Ожидаем посты...",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Обновить канал", callback_data="parse_channel")],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
-            ]), parse_mode="Markdown"
+            ]), parse_mode="MarkdownV2"
         )
         return
     
-    text = f"📦 **Каталог** ({len(products_db)} товаров)\\n\\n"
-    keyboard = []
+    text = f"Каталог ({len(products_db)} шт)\\n\\n"
+    kb = []
+    for p in products_db[:10]:
+        kb.append([InlineKeyboardButton(text=f"{format_price(p['price'])} | {p['name'][:25]}", callback_data=f"product_{p['id']}")])
+    kb.extend([[InlineKeyboardButton(text="🔄 Обновить", callback_data="parse_channel")], [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]])
     
-    for product in products_db[:10]:
-        keyboard.append([InlineKeyboardButton(
-            text=f"{format_price(product['price'])} | {product['name'][:25]}",
-            callback_data=f"product_{product['id']}"
-        )])
-    
-    keyboard.extend([
-        [InlineKeyboardButton(text="🔄 Обновить", callback_data="parse_channel")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="MarkdownV2")
 
 @router.callback_query(F.data.startswith("product_"))
-async def show_product(callback: CallbackQuery):
+async def product(callback: CallbackQuery):
     pid = int(callback.data.split("_")[1])
-    product = next((p for p in products_db if p['id'] == pid), None)
+    p = next((x for x in products_db if x['id'] == pid), None)
+    if not p: return await callback.answer("❌ Товар удален")
     
-    if not product:
-        return await callback.answer("❌ Товар не найден")
-    
-    text = f"🛍 **{product['name']}**\\n\\n{product['description']}\\n\\n💰 **{format_price(product['price'])}**"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    text = f"{p['name']}\\n\\n{p['description']}\\n\\n💰 <b>{format_price(p['price'])}</b>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Заказать", callback_data=f"buy_{pid}")],
         [InlineKeyboardButton(text="◀️ Каталог", callback_data="catalog")]
     ])
     
-    if product.get('photo'):
-        await callback.message.delete()
-        await bot.send_photo(callback.from_user.id, product['photo'], caption=text, 
-                           reply_markup=keyboard, parse_mode="Markdown")
-    else:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    try:
+        if p['photo']:
+            await callback.message.delete()
+            await bot.send_photo(callback.from_user.id, p['photo'], caption=text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except:
+        await callback.message.edit_text("❌ Ошибка фото", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("buy_"))
-async def buy_product(callback: CallbackQuery):
+async def buy(callback: CallbackQuery):
     pid = int(callback.data.split("_")[1])
-    product = next((p for p in products_db if p['id'] == pid), None)
+    p = next((x for x in products_db if x['id'] == pid), None)
     
     order_data = {
         'user_id': callback.from_user.id,
-        'username': callback.from_user.username or "no_username",
+        'username': callback.from_user.username or "none",
         'full_name': callback.from_user.full_name,
-        'product': product['name'],
-        'price': product['price'],
+        'product': p['name'],
+        'price': p['price'],
         'type': 'catalog'
     }
     
     save_order(order_data)
     
     await bot.send_message(ADMIN_ID, 
-        f"🔔 **НОВЫЙ ЗАКАЗ #{cursor.lastrowid}!**\\n\\n"
+        f"🔔 НОВЫЙ ЗАКАЗ #{cursor.lastrowid}!\\n"
         f"👤 {order_data['full_name']} (@{order_data['username']})\\n"
-        f"🛍 **{product['name']}**\\n"
-        f"💰 {format_price(product['price'])}\\n"
-        f"🆔 `{order_data['user_id']}`",
-        parse_mode="Markdown"
+        f"🛍 {p['name']}\\n💰 {format_price(p['price'])}\\n🆔 {order_data['user_id']}",
+        parse_mode="MarkdownV2"
     )
     
     await callback.message.edit_text(
-        f"✅ **Заказ #{cursor.lastrowid} принят!**\\n\\n"
-        f"🛍 {product['name']}\\n"
-        f"💰 {format_price(product['price'])}\\n\\n"
-        f"⏳ Менеджер свяжется!",
-        reply_markup=main_menu(), parse_mode="Markdown"
+        f"✅ Заказ #{cursor.lastrowid} принят!\\n"
+        f"🛍 {p['name']}\\n💰 {format_price(p['price'])}\\n⏳ Ждите связи!",
+        reply_markup=main_menu(), parse_mode="MarkdownV2"
     )
 
-# ===== АДМИН ПАНЕЛЬ =====
-@router.callback_query(F.data == "admin_stats")
-async def admin_stats(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
+# Админ
+@router.callback_query(F.data.in_(["admin_stats", "admin_orders", "parse_channel", "back_main"]))
+async def admin_callbacks(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return await callback.answer()
     
-    cursor.execute("SELECT COUNT(*) FROM orders")
-    total_orders = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
-    new_orders = cursor.fetchone()[0]
+    if callback.data == "admin_stats":
+        cursor.execute("SELECT COUNT(*) FROM orders")
+        total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
+        new_o = cursor.fetchone()[0]
+        await callback.message.edit_text(
+            f"📊 Статистика:\\n\\nТоваров: {len(products_db)}\\nЗаказов всего: {total}\\nНовых: {new_o}\\nПарсер: {PARSER_DELAY}с",
+            reply_markup=admin_menu(), parse_mode="MarkdownV2"
+        )
     
-    await callback.message.edit_text(
-        f"📊 **Статистика**\\n\\n"
-        f"📦 Товаров: {len(products_db)}\\n"
-        f"🛒 Всего заказов: {total_orders}\\n"
-        f"🆕 Новых: {new_orders}\\n"
-        f"⏱ Парсер: {PARSER_DELAY}с\\n\\n"
-        f"🗄️ **База:** poizon_bot.db",
-        reply_markup=admin_menu(), parse_mode="Markdown"
-    )
+    elif callback.data == "admin_orders":
+        cursor.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 10")
+        orders = cursor.fetchall()
+        if not orders:
+            return await callback.message.edit_text("Заказов нет", reply_markup=admin_menu())
+        text = "📦 Заказы:\n\n"
+        for o in orders:
+            text += f"#{o[0]} | @{o[2]} | {o[4][:25]} | {o[5]}\n"
+        await callback.message.edit_text(text, reply_markup=admin_menu(), parse_mode="MarkdownV2")
+    
+    elif callback.data == "parse_channel":
+        await parse_channel()
+        await callback.answer("🔄 Обновлено!")
+    
+    elif callback.data == "back_main":
+        await callback.message.edit_text("🏠 Главное меню:", reply_markup=main_menu())
 
-@router.callback_query(F.data == "admin_orders")
-async def admin_orders(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    
-    cursor.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10")
-    orders = cursor.fetchall()
-    
-    if not orders:
-        return await callback.message.edit_text("📦 Заказов нет", reply_markup=admin_menu())
-    
-    text = "📦 **Последние заказы:**\\n\\n"
-    for order in orders:
-        text += f"🆔 #{order[0]} | @{order[2]} | {order[4][:30]} | {order[5]}\n"
-    
-    await callback.message.edit_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
-
-@router.callback_query(F.data == "parse_channel")
-async def manual_parse(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    await parse_poizonlab_channel()
-    await callback.answer("🔄 Канал обновлен!")
-
-@router.callback_query(F.data == "back_main")
-async def back_main(callback: CallbackQuery):
-    await callback.message.edit_text("🏠 Главное меню:", reply_markup=main_menu())
-
-# ===== ЗАПУСК =====
 async def main():
     dp.include_router(router)
-    
-    # 🎯 АВТО-ПАРСЕР КАНАЛА
-    asyncio.create_task(auto_parse_channel())
-    
-    print("🤖 POIZON LAB Bot запущен!")
-    print(f"📱 Парсит: {CHANNEL_ID}")
-    print(f"⏱ Интервал: {PARSER_DELAY}с")
-    print(f"🗄️ База: poizon_bot.db")
-    
+    asyncio.create_task(auto_parser())
+    print(f"🤖 Запущен! Канал: {CHANNEL_ID} | Delay: {PARSER_DELAY}s")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
