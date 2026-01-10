@@ -95,12 +95,11 @@ def load_products():
             'post_id': row[6],
             'category': row[7] if len(row) > 7 else '🎒 Другое'
         })
-    return products_db
 
 def save_order(order_data):
-    cursor.execute('''INSERT INTO orders (user_id, username, full_name, product, price, type)
-    VALUES (?, ?, ?, ?, ?, ?)''', (order_data['user_id'], order_data['username'], 
-    order_data['full_name'], order_data['product'], order_data['price'], order_data['type']))
+    cursor.execute('INSERT INTO orders (user_id, username, full_name, product, price, type) VALUES (?, ?, ?, ?, ?, ?)',
+        (order_data['user_id'], order_data['username'], order_data['full_name'], 
+         order_data['product'], order_data['price'], order_data['type']))
     conn.commit()
     return cursor.lastrowid
 
@@ -191,8 +190,8 @@ async def auto_parse(message: Message):
     title = lines[0][:60].strip() if lines and len(lines[0]) > 5 else text[:60].strip() or f"Товар #{message.message_id}"
     category = detect_category(text)
     try:
-        cursor.execute('''INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category)
-        VALUES (?, ?, ?, ?, ?, ?, ?)''', (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id, category))
+        cursor.execute('INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id, category))
         conn.commit()
         if cursor.rowcount > 0:
             load_products()
@@ -204,7 +203,7 @@ async def auto_parse(message: Message):
 
 📦 Всего: {len(products_db)}")
     except Exception as e:
-        print(f"Ошибка парсинга: {e}")
+        print(f"Ошибка: {e}")
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -228,7 +227,7 @@ async def cmd_admin(message: Message):
 async def show_catalog(callback: CallbackQuery):
     if not products_db:
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]])
-        await callback.message.edit_text(f"📦 Каталог пуст", reply_markup=kb)
+        await callback.message.edit_text("📦 Каталог пуст", reply_markup=kb)
         return
     await callback.message.edit_text(f"📦 Каталог ({len(products_db)} товаров)
 
@@ -265,7 +264,6 @@ async def show_product(callback: CallbackQuery):
     if not p:
         await callback.answer("❌ Товар не найден", show_alert=True)
         return
-    
     text = f"🛍 {p['name']}
 
 {p['description']}
@@ -277,12 +275,10 @@ async def show_product(callback: CallbackQuery):
         [InlineKeyboardButton(text="✅ Заказать", callback_data=f"buy_{pid}")],
         [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")]
     ])
-    
     try:
         await callback.message.delete()
     except:
         pass
-    
     if p.get('photo'):
         await bot.send_photo(callback.from_user.id, photo=p['photo'], caption=text, reply_markup=kb)
     else:
@@ -295,7 +291,6 @@ async def buy(callback: CallbackQuery):
     if not p:
         await callback.answer("❌ Товар удален", show_alert=True)
         return
-    
     order_data = {
         'user_id': callback.from_user.id,
         'username': callback.from_user.username or "no_username",
@@ -305,7 +300,6 @@ async def buy(callback: CallbackQuery):
         'type': 'catalog'
     }
     order_id = save_order(order_data)
-    
     await bot.send_message(ADMIN_ID, f"🔔 ЗАКАЗ #{order_id}
 
 👤 {order_data['full_name']}
@@ -314,12 +308,10 @@ async def buy(callback: CallbackQuery):
 🛍 {p['name']}
 💰 {format_price(p['price'])} ₽")
     await callback.answer("✅ Заказ оформлен!", show_alert=True)
-    
     try:
         await callback.message.delete()
     except:
         pass
-    
     await bot.send_message(callback.from_user.id, f"✅ ЗАКАЗ #{order_id} ОФОРМЛЕН!
 
 🛍 {p['name']}
@@ -476,8 +468,11 @@ async def back(callback: CallbackQuery, state: FSMContext):
 
 async def main():
     dp.include_router(router)
-    print("🤖 БОТ ЗАПУЩЕН!")
+    print("=" * 50)
+    print("🤖 POIZON LAB БОТ ЗАПУЩЕН!")
     print(f"📦 Товаров: {len(products_db)}")
+    print(f"📱 Канал: {CHANNEL_ID}")
+    print("=" * 50)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
