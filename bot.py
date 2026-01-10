@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -18,16 +18,19 @@ OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 CATALOG_FILE = "catalog.json"
 ORDERS_FILE = "orders.json"
 
+# Состояния
 MENU, LINK_1, LINK_2, LINK_3 = range(4)
 CAT_1, CAT_2, CAT_3 = range(4, 7)
 ADMIN_PHOTO, ADMIN_NAME, ADMIN_PRICE, ADMIN_SIZES = range(7, 11)
 SUPPORT = range(11, 12)
 
 def init_files():
-    for file in [CATALOG_FILE, ORDERS_FILE]:
-        if not os.path.exists(file):
-            with open(file, "w", encoding="utf-8") as f:
-                json.dump([], f)
+    if not os.path.exists(CATALOG_FILE):
+        with open(CATALOG_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f)
+    if not os.path.exists(ORDERS_FILE):
+        with open(ORDERS_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f)
 
 def load_data(filename):
     with open(filename, "r", encoding="utf-8") as f:
@@ -63,13 +66,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        return
+        return MENU
     await update.message.reply_text("Админ-панель:", reply_markup=get_admin_keyboard())
+    return MENU
 
 async def order_link_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Шаг 1/3: Отправьте ссылку на товар:")
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("Шаг 1/3: Отправьте ссылку на товар:")
     return LINK_1
 
 async def order_link_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,172 +87,160 @@ async def order_link_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def order_link_3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comment = update.message.text
-    user = update.effective_user
+    user_id = update.effective_user.id
     order = {
         "type": "link",
-        "user_id": user.id,
+        "user_id": user_id,
         "product": None,
         "messages": [context.user_data['link_url'], context.user_data['link_size'], comment]
     }
     orders = load_data(ORDERS_FILE)
     orders.append(order)
     save_data(ORDERS_FILE, orders)
-    
-    admin_msg = f"📦 НОВЫЙ ЗАКАЗ (ССЫЛКА)\nОт: {user.id}\n1: {order['messages'][0]}\n2: {order['messages'][1]}\n3: {order['messages'][2]}"
-    await context.bot.send_message(chat_id=OWNER_ID, text=admin_msg)
-    
-    await update.message.reply_text("✅ Заказ оформлен!")
+    await context.bot.send_message(OWNER_ID, f"📦 ЗАКАЗ ПО ССЫЛКЕ\nID: {user_id}\n1: {order['messages'][0]}\n2: {order['messages'][1]}\n3: {order['messages'][2]}")
+    await update.message.reply_text("✅ Заказ принят!")
     return await start(update, context)
 
 async def catalog_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    await update.callback_query.answer()
     items = load_data(CATALOG_FILE)
     if not items:
-        await query.edit_message_text("Каталог пуст.", reply_markup=get_main_keyboard())
+        await update.callback_query.edit_message_text("Каталог пуст.", reply_markup=get_main_keyboard())
         return MENU
-    
     for item in items:
-        caption = f"📦 {item['name']}\n💰 Цена: {item['price']}\n📏 Размеры: {item['sizes']}"
+        cap = f"📦 {item['name']}\n💰 Цена: {item['price']}\n📏 Размеры: {item['sizes']}"
         kb = [[InlineKeyboardButton("Заказать", callback_data=f"buy_{item['id']}")]]
-        await context.bot.send_photo(chat_id=query.message.chat_id, photo=item['photo_id'], caption=caption, reply_markup=InlineKeyboardMarkup(kb))
+        await context.bot.send_photo(update.effective_chat.id, item['photo_id'], caption=cap, reply_markup=InlineKeyboardMarkup(kb))
     return MENU
 
-async def buy_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    item_id = query.data.split('_')[1]
-    context.user_data['buy_id'] = item_id
-    await context.bot.send_message(chat_id=query.message.chat_id, text="Шаг 1/3: Отправьте размер:")
+async def buy_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    context.user_data['buy_id'] = update.callback_query.data.split('_')[1]
+    await context.bot.send_message(update.effective_chat.id, "Шаг 1/3: Укажите размер:")
     return CAT_1
 
 async def buy_step_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['buy_size'] = update.message.text
-    await update.message.reply_text("Шаг 2/3: Отправьте цвет / комментарий:")
+    await update.message.reply_text("Шаг 2/3: Укажите цвет / комментарий:")
     return CAT_2
 
 async def buy_step_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['buy_comment'] = update.message.text
-    await update.message.reply_text("Шаг 3/3: Отправьте контактные данные / адрес:")
+    await update.message.reply_text("Шаг 3/3: Укажите адрес / контакт:")
     return CAT_3
 
 async def buy_step_3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = update.message.text
-    user = update.effective_user
+    user_id = update.effective_user.id
     items = load_data(CATALOG_FILE)
-    item_name = next((i['name'] for i in items if str(i['id']) == str(context.user_data['buy_id'])), "Unknown")
-    
+    item = next((i for i in items if str(i['id']) == str(context.user_data['buy_id'])), None)
+    name = item['name'] if item else "Удаленный товар"
     order = {
         "type": "catalog",
-        "user_id": user.id,
-        "product": item_name,
-        "messages": [context.user_data['buy_size'], context.user_data['buy_comment'], contact]
+        "user_id": user_id,
+        "product": name,
+        "messages": [context.user_data['buy_size'], context.user_data['buy_comment'], update.message.text]
     }
     orders = load_data(ORDERS_FILE)
     orders.append(order)
     save_data(ORDERS_FILE, orders)
-    
-    admin_msg = f"🛍️ НОВЫЙ ЗАКАЗ (КАТАЛОГ)\nТовар: {item_name}\nОт: {user.id}\n1: {order['messages'][0]}\n2: {order['messages'][1]}\n3: {order['messages'][2]}"
-    await context.bot.send_message(chat_id=OWNER_ID, text=admin_msg)
-    
-    await update.message.reply_text("✅ Заказ оформлен!")
+    await context.bot.send_message(OWNER_ID, f"🛍️ ЗАКАЗ ИЗ КАТАЛОГА\nТовар: {name}\nID: {user_id}\n1: {order['messages'][0]}\n2: {order['messages'][1]}\n3: {order['messages'][2]}")
+    await update.message.reply_text("✅ Товар заказан!")
     return await start(update, context)
 
 async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Опишите вашу проблему в одном сообщении:")
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("Опишите ваш вопрос:")
     return SUPPORT
 
 async def support_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    msg = update.message.text
-    await context.bot.send_message(chat_id=OWNER_ID, text=f"💬 ТЕХПОДДЕРЖКА\nОт: {user_id}\nСообщение: {msg}")
-    await update.message.reply_text("Ваше сообщение отправлено поддержке.")
+    await context.bot.send_message(OWNER_ID, f"💬 ТЕХПОДДЕРЖКА\nID: {update.effective_user.id}\nТекст: {update.message.text}")
+    await update.message.reply_text("Отправлено.")
     return await start(update, context)
 
 async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.edit_message_text("1) Отправьте фото товара:")
+    await update.callback_query.edit_message_text("Отправьте ФОТО товара:")
     return ADMIN_PHOTO
 
 async def admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_photo'] = update.message.photo[-1].file_id
-    await update.message.reply_text("2) Введите название:")
+    context.user_data['new_p'] = update.message.photo[-1].file_id
+    await update.message.reply_text("Введите НАЗВАНИЕ:")
     return ADMIN_NAME
 
 async def admin_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_name'] = update.message.text
-    await update.message.reply_text("3) Введите цену:")
+    context.user_data['new_n'] = update.message.text
+    await update.message.reply_text("Введите ЦЕНУ:")
     return ADMIN_PRICE
 
 async def admin_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_price'] = update.message.text
-    await update.message.reply_text("4) Введите размеры через запятую:")
+    context.user_data['new_pr'] = update.message.text
+    await update.message.reply_text("Введите РАЗМЕРЫ через запятую:")
     return ADMIN_SIZES
 
 async def admin_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = load_data(CATALOG_FILE)
-    new_id = len(items) + 1
-    new_item = {
-        "id": new_id,
-        "name": context.user_data['new_name'],
-        "photo_id": context.user_data['new_photo'],
-        "price": context.user_data['new_price'],
+    item = {
+        "id": int(update.message.message_id),
+        "name": context.user_data['new_n'],
+        "photo_id": context.user_data['new_p'],
+        "price": context.user_data['new_pr'],
         "sizes": update.message.text
     }
-    items.append(new_item)
+    items.append(item)
     save_data(CATALOG_FILE, items)
     await update.message.reply_text("✅ Товар добавлен!")
     return await start(update, context)
 
-async def admin_view_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    orders = load_data(ORDERS_FILE)
-    if not orders:
-        await update.callback_query.message.reply_text("Заказов нет.")
-        return
-    for o in orders:
-        msg = f"Тип: {o['type']}\nUser: {o['user_id']}\nТовар: {o['product']}\nИнфо: {o['messages']}"
-        await update.callback_query.message.reply_text(msg)
-
-async def admin_del_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_del_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     items = load_data(CATALOG_FILE)
     if not items:
         await update.callback_query.edit_message_text("Каталог пуст.")
-        return
-    kb = []
-    for i in items:
-        kb.append([InlineKeyboardButton(f"Удалить {i['name']}", callback_data=f"del_{i['id']}")])
+        return MENU
+    kb = [[InlineKeyboardButton(f"❌ {i['name']}", callback_data=f"del_{i['id']}")] for i in items]
     await update.callback_query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(kb))
+    return MENU
 
 async def admin_del_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    item_id = int(query.data.split('_')[1])
+    await update.callback_query.answer()
+    item_id = int(update.callback_query.data.split('_')[1])
     items = load_data(CATALOG_FILE)
     items = [i for i in items if i['id'] != item_id]
     save_data(CATALOG_FILE, items)
-    await query.edit_message_text("Товар удален.")
+    await update.callback_query.edit_message_text("🗑️ Удалено.")
     return await start(update, context)
+
+async def admin_orders_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    orders = load_data(ORDERS_FILE)
+    if not orders:
+        await context.bot.send_message(update.effective_chat.id, "Заказов нет.")
+        return MENU
+    for o in orders:
+        txt = f"Тип: {o['type']}\nID: {o['user_id']}\nТовар: {o['product']}\nИнфо: {o['messages']}"
+        await context.bot.send_message(update.effective_chat.id, txt)
+    return MENU
 
 if __name__ == "__main__":
     init_files()
     app = ApplicationBuilder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            CallbackQueryHandler(order_link_start, pattern="^order_link$"),
-            CallbackQueryHandler(catalog_list, pattern="^catalog_list$"),
-            CallbackQueryHandler(support_start, pattern="^support$"),
-            CallbackQueryHandler(buy_item, pattern="^buy_"),
-            CallbackQueryHandler(admin_add_start, pattern="^admin_add$"),
-            CallbackQueryHandler(admin_del_start, pattern="^admin_del$"),
+            CommandHandler("admin", admin_panel),
         ],
         states={
-            MENU: [CallbackQueryHandler(order_link_start, pattern="^order_link$"), CallbackQueryHandler(catalog_list, pattern="^catalog_list$"), CallbackQueryHandler(support_start, pattern="^support$")],
+            MENU: [
+                CallbackQueryHandler(order_link_start, pattern="^order_link$"),
+                CallbackQueryHandler(catalog_list, pattern="^catalog_list$"),
+                CallbackQueryHandler(support_start, pattern="^support$"),
+                CallbackQueryHandler(admin_add_start, pattern="^admin_add$"),
+                CallbackQueryHandler(admin_del_list, pattern="^admin_del$"),
+                CallbackQueryHandler(admin_orders_view, pattern="^admin_orders$"),
+                CallbackQueryHandler(admin_del_confirm, pattern="^del_"),
+                CallbackQueryHandler(buy_item_start, pattern="^buy_"),
+            ],
             LINK_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_link_1)],
             LINK_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_link_2)],
             LINK_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_link_3)],
@@ -263,11 +254,8 @@ if __name__ == "__main__":
             ADMIN_SIZES: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_sizes)],
         },
         fallbacks=[CommandHandler("start", start)],
+        allow_reentry=True
     )
 
-    app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CallbackQueryHandler(admin_view_orders, pattern="^admin_orders$"))
-    app.add_handler(CallbackQueryHandler(admin_del_confirm, pattern="^del_"))
-
+    app.add_handler(conv)
     app.run_polling()
