@@ -26,6 +26,10 @@ CATALOG_FILE = "catalog.json"
 CATALOG = []
 CATALOG_ID = 1
 
+ORDERS_LINK = []
+ORDERS_CATALOG = []
+SUPPORT_MESSAGES = []
+
 # ================= LOAD / SAVE =================
 def load_catalog():
     global CATALOG, CATALOG_ID
@@ -47,8 +51,9 @@ def save_catalog():
 # ================= MENUS =================
 def main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Каталог товаров", callback_data="catalog")],
         [InlineKeyboardButton("🛒 Заказать через ссылку", callback_data="order_link")],
+        [InlineKeyboardButton("📦 Каталог товаров", callback_data="catalog")],
+        [InlineKeyboardButton("💬 Техподдержка", callback_data="support")],
     ])
 
 def admin_menu():
@@ -62,8 +67,9 @@ def catalog_menu():
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("— каталог пуст —", callback_data="noop")]
         ])
+
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(item["name"], callback_data=f"catalog_{item['id']}")]
+        [InlineKeyboardButton(item["name"], callback_data=f"catalog_item_{item['id']}")]
         for item in CATALOG
     ])
 
@@ -71,9 +77,10 @@ def catalog_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "👋 *POIZON LAB*\n\n"
-        "Оригинальная одежда и обувь из POIZON 🇨🇳\n\n"
-        "Выберите действие 👇",
+        "👋 *Привет!*\n\n"
+        "Ты в *POIZON LAB* — помогаем заказать *оригинальную одежду и обувь* "
+        "с платформы POIZON 🇨🇳\n\n"
+        "Выбери, что хочешь сделать 👇",
         reply_markup=main_menu(),
         parse_mode="Markdown"
     )
@@ -92,23 +99,52 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "catalog":
+    # --- SUPPORT ---
+    if query.data == "support":
+        context.user_data.clear()
+        context.user_data["state"] = "support"
+        await query.message.reply_text(
+            "💬 *Техподдержка*\n\n"
+            "Опиши вопрос — мы ответим как можно быстрее 👌",
+            parse_mode="Markdown"
+        )
+
+    # --- ORDER LINK ---
+    elif query.data == "order_link":
+        context.user_data.clear()
+        context.user_data.update({
+            "state": "order_link",
+            "count": 0,
+            "messages": []
+        })
+        await query.message.reply_text(
+            "🛒 *Заказ через ссылку*\n\n"
+            "Отправь *3 сообщения*:\n"
+            "🔗 ссылку на товар\n"
+            "📏 размер\n"
+            "🎨 цвет / комментарий\n\n"
+            "После этого заказ будет принят ✅",
+            parse_mode="Markdown"
+        )
+
+    # --- CATALOG ---
+    elif query.data == "catalog":
         await query.message.reply_text(
             "📦 *Каталог товаров*",
             reply_markup=catalog_menu(),
             parse_mode="Markdown"
         )
 
-    elif query.data.startswith("catalog_"):
-        item_id = int(query.data.replace("catalog_", ""))
+    elif query.data.startswith("catalog_item_"):
+        item_id = int(query.data.replace("catalog_item_", ""))
         item = next(i for i in CATALOG if i["id"] == item_id)
 
         context.user_data.clear()
         context.user_data.update({
             "state": "order_catalog",
+            "product": item["name"],
             "count": 0,
-            "messages": [],
-            "product": item["name"]
+            "messages": []
         })
 
         await context.bot.send_photo(
@@ -118,16 +154,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📦 *{item['name']}*\n\n"
                 f"💰 Цена: *{item['price']} ₽*\n"
                 f"📏 Размеры: *{', '.join(item['sizes'])}*\n\n"
-                "Отправьте *3 сообщения* для заказа ✍️"
+                "Отправь *3 сообщения* для заказа:\n"
+                "📏 размер\n"
+                "🎨 цвет\n"
+                "✍️ комментарий"
             ),
-            parse_mode="Markdown"
-        )
-
-    elif query.data == "order_link":
-        context.user_data.clear()
-        context.user_data.update({"state": "order_link", "count": 0})
-        await query.message.reply_text(
-            "🛒 Отправьте *3 сообщения* для заказа по ссылке",
             parse_mode="Markdown"
         )
 
@@ -163,11 +194,12 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MESSAGE HANDLER =================
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CATALOG_ID
+
     uid = update.message.from_user.id
     text = update.message.text
     state = context.user_data.get("state")
 
-    # ADMIN FLOW
+    # --- ADMIN ADD FLOW ---
     if uid == ADMIN_ID:
         if state == "admin_photo" and update.message.photo:
             context.user_data["photo"] = update.message.photo[-1].file_id
@@ -184,9 +216,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state == "admin_price":
             context.user_data["price"] = text
             context.user_data["state"] = "admin_sizes"
-            await update.message.reply_text(
-                "📏 Размеры через запятую\nПример: 40,41,42"
-            )
+            await update.message.reply_text("📏 Размеры через запятую (пример: 40,41,42)")
             return
 
         if state == "admin_sizes":
@@ -200,15 +230,30 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             CATALOG_ID += 1
             save_catalog()
             context.user_data.clear()
-            await update.message.reply_text("✅ Товар добавлен")
+            await update.message.reply_text("✅ Товар добавлен в каталог")
             return
 
-    # ORDER FLOW
-    if state in ("order_catalog", "order_link"):
+    # --- SUPPORT ---
+    if state == "support":
+        SUPPORT_MESSAGES.append({"user_id": uid, "text": text})
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💬 Техподдержка | user_id: {uid}\n\n{text}"
+        )
+        return
+
+    # --- ORDERS ---
+    if state in ("order_link", "order_catalog"):
         context.user_data["count"] += 1
+        context.user_data["messages"].append(text)
+
         if context.user_data["count"] >= 3:
-            await update.message.reply_text("✅ Заказ принят")
+            await update.message.reply_text(
+                "✅ *Заказ принят!*\n\nМы скоро свяжемся с тобой 👌",
+                parse_mode="Markdown"
+            )
             context.user_data.clear()
+        return
 
 # ================= MAIN =================
 def main():
@@ -219,7 +264,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(CallbackQueryHandler(admin_callbacks, pattern="^admin"))
+    app.add_handler(CallbackQueryHandler(admin_callbacks, pattern="^(admin|del_)"))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_messages))
 
     app.run_polling(close_loop=False)
