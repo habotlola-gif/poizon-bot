@@ -252,7 +252,12 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "user_id": uid,
                 "messages": context.user_data["messages"]
             })
-            await update.message.reply_text("✅ Заказ принят")
+            await update.message.reply_text(
+                "✅ *Заказ принят!*\n\n"
+                "Вы можете продолжить 👇",
+                reply_markup=main_menu(),
+                parse_mode="Markdown"
+            )
             context.user_data.clear()
         return
 
@@ -265,8 +270,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
 
-    # ❗ админские callback-и ПЕРВЫЕ
-    app.add_handler(CallbackQueryHandler(admin_callbacks, pattern="^(admin|del_)"))
+    # админские callback-и ПЕРВЫМИ
+    app.add_handler(CallbackQueryHandler(admin_callbacks, pattern="^admin_|^del_"))
     app.add_handler(CallbackQueryHandler(buttons))
 
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_messages))
