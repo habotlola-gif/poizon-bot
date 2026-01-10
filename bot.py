@@ -15,13 +15,14 @@ TOKEN = os.getenv("TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 ADMIN_ID = OWNER_ID
 
-# ================= FILE =================
+# ================= FILES =================
 CATALOG_FILE = "catalog.json"
+ORDERS_FILE = "orders.json"
 
 # ================= STORAGE =================
 CATALOG = []
 CATALOG_ID = 1
-ORDERS_LINK = []
+ORDERS = []   # ВСЕ заказы: и ссылка, и каталог
 
 # ================= LOAD / SAVE =================
 def load_catalog():
@@ -41,6 +42,16 @@ def save_catalog():
             indent=2
         )
 
+def load_orders():
+    global ORDERS
+    if os.path.exists(ORDERS_FILE):
+        with open(ORDERS_FILE, "r", encoding="utf-8") as f:
+            ORDERS = json.load(f)
+
+def save_orders():
+    with open(ORDERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(ORDERS, f, ensure_ascii=False, indent=2)
+
 # ================= MENUS =================
 def main_menu():
     return InlineKeyboardMarkup([
@@ -51,7 +62,7 @@ def main_menu():
 
 def admin_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Заказы по ссылке", callback_data="admin_orders_link")],
+        [InlineKeyboardButton("📦 Все заказы", callback_data="admin_all_orders")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_item")],
         [InlineKeyboardButton("❌ Удалить товар", callback_data="admin_delete_item")],
     ])
@@ -70,8 +81,8 @@ def catalog_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "👋 *Привет!*\n\n"
-        "Ты в *POIZON LAB* — помогаем заказать оригинальные вещи из POIZON 🇨🇳\n\n"
+        "👋 *POIZON LAB*\n\n"
+        "Оригинальная одежда и обувь из POIZON 🇨🇳\n\n"
         "Выбери действие 👇",
         reply_markup=main_menu(),
         parse_mode="Markdown"
@@ -94,16 +105,19 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.from_user.id != ADMIN_ID:
         return
 
-    if query.data == "admin_orders_link":
-        if not ORDERS_LINK:
-            await query.message.reply_text("📦 Заказов по ссылке нет")
+    if query.data == "admin_all_orders":
+        if not ORDERS:
+            await query.message.reply_text("📦 Заказов пока нет")
             return
 
-        text = "📦 *Заказы по ссылке*\n\n"
-        for i, order in enumerate(ORDERS_LINK, 1):
-            text += f"#{i}\nuser_id: {order['user_id']}\n"
-            for msg in order["messages"]:
-                text += f"• {msg}\n"
+        text = "📦 *ВСЕ ЗАКАЗЫ*\n\n"
+        for i, o in enumerate(ORDERS, 1):
+            text += f"#{i} | {'Заказ по ссылке' if o['type']=='link' else 'Заказ из каталога'}\n"
+            if o["product"]:
+                text += f"Товар: {o['product']}\n"
+            text += f"user_id: {o['user_id']}\n"
+            for m in o["messages"]:
+                text += f"• {m}\n"
             text += "\n"
 
         await query.message.reply_text(text, parse_mode="Markdown")
@@ -149,9 +163,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "🛒 *Заказ через ссылку*\n\n"
             "Отправь *3 сообщения*:\n"
-            "🔗 ссылка\n"
-            "📏 размер\n"
-            "🎨 цвет / комментарий",
+            "🔗 ссылка\n📏 размер\n🎨 цвет",
             parse_mode="Markdown"
         )
 
@@ -169,6 +181,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         context.user_data.update({
             "state": "order_catalog",
+            "product": item["name"],
             "count": 0,
             "messages": []
         })
@@ -180,8 +193,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📦 *{item['name']}*\n"
                 f"💰 Цена: *{item['price']} ₽*\n"
                 f"📏 Размеры: *{', '.join(item['sizes'])}*\n\n"
-                "Отправь *3 сообщения*:\n"
-                "📏 размер\n🎨 цвет\n✍️ комментарий"
+                "Отправь *3 сообщения*:\n📏 размер\n🎨 цвет\n✍️ комментарий"
             ),
             parse_mode="Markdown"
         )
@@ -194,7 +206,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     state = context.user_data.get("state")
 
-    # --- ADMIN ADD FLOW ---
+    # --- ADMIN ADD ITEM ---
     if uid == ADMIN_ID:
         if state == "admin_photo" and update.message.photo:
             context.user_data["photo"] = update.message.photo[-1].file_id
@@ -236,22 +248,25 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # --- ORDER LINK ---
-    if state == "order_link":
+    # --- ORDERS ---
+    if state in ("order_link", "order_catalog"):
         context.user_data["count"] += 1
         context.user_data["messages"].append(text)
-        count = context.user_data["count"]
 
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"📦 Заказ по ссылке\n{count}/3\nuser_id: {uid}\n\n{text}"
+            text=f"📦 Новый заказ\nuser_id: {uid}\n\n{text}"
         )
 
-        if count >= 3:
-            ORDERS_LINK.append({
+        if context.user_data["count"] >= 3:
+            ORDERS.append({
+                "type": "link" if state == "order_link" else "catalog",
                 "user_id": uid,
+                "product": context.user_data.get("product"),
                 "messages": context.user_data["messages"]
             })
+            save_orders()
+
             await update.message.reply_text(
                 "✅ *Заказ принят!*\n\n"
                 "Вы можете продолжить 👇",
@@ -264,13 +279,13 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MAIN =================
 def main():
     load_catalog()
+    load_orders()
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
 
-    # админские callback-и ПЕРВЫМИ
     app.add_handler(CallbackQueryHandler(admin_callbacks, pattern="^admin_|^del_"))
     app.add_handler(CallbackQueryHandler(buttons))
 
