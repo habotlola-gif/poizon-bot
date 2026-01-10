@@ -24,7 +24,6 @@ router = Router()
 conn = sqlite3.connect('poizon_bot.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Создание таблиц
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,8 +54,6 @@ conn.commit()
 
 # Глобальные переменные
 products_db = []
-CHANNEL_POSTS = set()
-PARSER_DELAY = 600  # 10 минут
 
 # ===== ФУНКЦИИ БД =====
 def load_products():
@@ -111,8 +108,6 @@ def admin_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📦 Заказы", callback_data="admin_orders")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="🔄 Обновить канал", callback_data="parse_channel")],
-        [InlineKeyboardButton(text=f"⏱ Delay: {PARSER_DELAY}s", callback_data="admin_delay")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")]
     ])
 
@@ -121,84 +116,72 @@ def back_button():
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
     ])
 
-# ===== ПАРСЕР КАНАЛА =====
-async def parse_channel():
-    """Парсит новые посты из канала"""
-    global CHANNEL_POSTS
+# ===== АВТОМАТИЧЕСКИЙ ПАРСЕР КАНАЛА =====
+@router.channel_post()
+async def auto_parse_channel_post(message: Message):
+    """Автоматически ловит КАЖДЫЙ новый пост из канала"""
     
+    # Проверка что это нужный канал
     try:
-        # Получаем последние 20 сообщений
-        messages = await bot.get_chat_history(CHANNEL_ID, limit=20)
-        new_count = 0
+        channel_username = message.chat.username
+        if not channel_username or f"@{channel_username}" != CHANNEL_ID:
+            return
+    except:
+        return
+    
+    print(f"📱 Новый пост в канале #{message.message_id}")
+    
+    # Должно быть фото
+    if not message.photo:
+        print("⚠️ Пост без фото - пропускаем")
+        return
+    
+    text = message.caption or ""
+    
+    # Ищем цену (разные форматы: 4653₽, 4 653 руб, 4653)
+    price_match = re.search(r'(\d[\d\s]*?)(?=\s*[₽руб$RUB])', text)
+    if price_match:
+        price = price_match.group(1).replace(' ', '')
+    else:
+        # Пробуем найти просто число
+        price_match = re.search(r'(\d{3,})', text)
+        price = price_match.group(1) if price_match else "Цена в ЛС"
+    
+    # Название (первая строка или первые 60 символов)
+    lines = text.split('\n')
+    if lines and len(lines[0]) > 5:
+        title = lines[0][:60].strip()
+    else:
+        title = text[:60].strip() if text else f"Товар #{message.message_id}"
+    
+    # Сохраняем в БД (НЕ дублируем)
+    try:
+        cursor.execute('''
+        INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id))
         
-        for message in reversed(messages):
-            # Пропускаем если уже обработан
-            if message.message_id in CHANNEL_POSTS:
-                continue
-            
-            # Нужно фото
-            if not message.photo:
-                continue
-            
-            text = message.caption or message.text or ""
-            
-            # Извлекаем цену
-            price_match = re.search(r'(\d[\d\s]*?)(?=\s*[₽руб$RUB])', text)
-            if price_match:
-                price = price_match.group(1).replace(' ', '')
-            else:
-                price = "Цена в ЛС"
-            
-            # Название товара (первая строка)
-            lines = text.split('\n')
-            title = lines[0][:60] if lines else f"Товар #{message.message_id}"
-            
-            # Сохраняем в БД
-            try:
-                cursor.execute('''
-                INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ''', (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id))
-                
-                if cursor.rowcount > 0:
-                    new_count += 1
-                
-                conn.commit()
-            except Exception as e:
-                print(f"Ошибка сохранения товара: {e}")
-            
-            CHANNEL_POSTS.add(message.message_id)
+        conn.commit()
         
-        # Перезагружаем товары
-        load_products()
-        
-        # Уведомление админу
-        if new_count > 0:
+        # Если добавлен новый товар
+        if cursor.rowcount > 0:
+            load_products()
+            
+            # Уведомление админу
             await bot.send_message(
                 ADMIN_ID,
-                f"✅ Парсер обновлен!\n\n"
-                f"Добавлено новых товаров: {new_count}\n"
-                f"Всего в каталоге: {len(products_db)}"
+                f"✅ НОВЫЙ ТОВАР В КАТАЛОГЕ!\n\n"
+                f"🛍 {title}\n"
+                f"💰 {format_price(price)} ₽\n\n"
+                f"📦 Всего товаров: {len(products_db)}"
             )
-        
-        print(f"✅ Парсер: добавлено {new_count} товаров")
-        
-    except Exception as e:
-        error_msg = f"❌ Ошибка парсера: {e}"
-        print(error_msg)
-        try:
-            await bot.send_message(ADMIN_ID, error_msg)
-        except:
-            pass
-
-async def auto_parser():
-    """Авто-парсинг с интервалом"""
-    global PARSER_DELAY
-    await asyncio.sleep(5)  # Ждем 5 сек после запуска
+            
+            print(f"✅ Товар добавлен: {title} | {price}₽")
+        else:
+            print(f"⚠️ Товар уже существует: #{message.message_id}")
     
-    while True:
-        await parse_channel()
-        await asyncio.sleep(PARSER_DELAY)
+    except Exception as e:
+        print(f"❌ Ошибка сохранения товара: {e}")
 
 # ===== КОМАНДЫ =====
 @router.message(Command("start"))
@@ -206,7 +189,7 @@ async def cmd_start(message: Message):
     await message.answer(
         f"👋 Добро пожаловать в POIZON LAB!\n\n"
         f"📦 Товаров в каталоге: {len(products_db)}\n"
-        f"🔄 Автоматический парсинг: {CHANNEL_ID}\n\n"
+        f"🔄 Автоматический каталог из {CHANNEL_ID}\n\n"
         f"Выберите действие:",
         reply_markup=main_menu()
     )
@@ -223,69 +206,42 @@ async def cmd_admin(message: Message):
     total_orders = cursor.fetchone()[0]
     
     await message.answer(
-        f"🔐 Админ-панель\n\n"
+        f"🔐 Админ-панель POIZON LAB\n\n"
         f"📦 Товаров: {len(products_db)}\n"
         f"🛒 Заказов всего: {total_orders}\n"
         f"🆕 Новых заказов: {new_orders}\n"
-        f"⏱ Интервал парсера: {PARSER_DELAY}с ({PARSER_DELAY//60}м)\n"
-        f"📱 Канал: {CHANNEL_ID}",
+        f"📱 Канал: {CHANNEL_ID}\n"
+        f"🔄 Парсер: Автоматический (мгновенно)\n\n"
+        f"💡 Новые посты в канале добавляются автоматически!",
         reply_markup=admin_menu()
     )
 
-@router.message(Command("delay"))
-async def cmd_delay(message: Message):
-    global PARSER_DELAY
-    
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Только для админа!")
-        return
-    
-    try:
-        args = message.text.split()
-        if len(args) < 2:
-            raise ValueError()
-        
-        new_delay = int(args[1])
-        
-        if new_delay < 30:
-            await message.answer("❌ Минимальный интервал: 30 секунд")
-            return
-        
-        PARSER_DELAY = new_delay
-        await message.answer(
-            f"✅ Интервал парсера изменен!\n\n"
-            f"⏱ Новый интервал: {new_delay} сек ({new_delay//60} мин)"
-        )
-        print(f"⏱ Интервал изменен: {new_delay}с")
-        
-    except (ValueError, IndexError):
-        await message.answer(
-            f"📊 Текущий интервал парсера: {PARSER_DELAY} сек\n\n"
-            f"Использование:\n"
-            f"/delay 60 — каждую минуту\n"
-            f"/delay 300 — каждые 5 минут\n"
-            f"/delay 1800 — каждые 30 минут"
-        )
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    await message.answer(
+        "📖 Помощь по боту\n\n"
+        "Команды:\n"
+        "/start - Главное меню\n"
+        "/catalog - Каталог товаров\n"
+        "/help - Эта справка\n\n"
+        "Для админа:\n"
+        "/admin - Админ-панель",
+        reply_markup=back_button()
+    )
 
-# ===== КАТАЛОГ =====
-@router.callback_query(F.data == "catalog")
-async def show_catalog(callback: CallbackQuery):
+@router.message(Command("catalog"))
+async def cmd_catalog(message: Message):
     if not products_db:
-        await callback.message.edit_text(
-            "📦 Каталог пока пуст\n\n"
-            "🔄 Ожидаем посты из канала...\n"
-            f"Парсим: {CHANNEL_ID}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Обновить", callback_data="parse_channel")],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
-            ])
+        await message.answer(
+            f"📦 Каталог пока пуст\n\n"
+            f"Ожидаем посты из {CHANNEL_ID}...",
+            reply_markup=back_button()
         )
         return
     
-    text = f"📦 Каталог POIZON LAB\n\n"
-    text += f"Всего товаров: {len(products_db)}\n\n"
-    
+    text = f"📦 Каталог POIZON LAB\n\nВсего товаров: {len(products_db)}\n\n"
     keyboard = []
+    
     for product in products_db[:10]:
         button_text = f"{format_price(product['price'])} ₽ | {product['name'][:25]}"
         keyboard.append([InlineKeyboardButton(
@@ -293,7 +249,32 @@ async def show_catalog(callback: CallbackQuery):
             callback_data=f"product_{product['id']}"
         )])
     
-    keyboard.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="parse_channel")])
+    keyboard.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+# ===== КАТАЛОГ =====
+@router.callback_query(F.data == "catalog")
+async def show_catalog(callback: CallbackQuery):
+    if not products_db:
+        await callback.message.edit_text(
+            f"📦 Каталог пока пуст\n\n"
+            f"🔄 Ожидаем посты из {CHANNEL_ID}...\n\n"
+            f"💡 Новые товары появятся автоматически!",
+            reply_markup=back_button()
+        )
+        return
+    
+    text = f"📦 Каталог POIZON LAB\n\nВсего товаров: {len(products_db)}\n\n"
+    keyboard = []
+    
+    for product in products_db[:10]:
+        button_text = f"{format_price(product['price'])} ₽ | {product['name'][:25]}"
+        keyboard.append([InlineKeyboardButton(
+            text=button_text,
+            callback_data=f"product_{product['id']}"
+        )])
+    
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")])
     
     await callback.message.edit_text(
@@ -370,8 +351,8 @@ async def buy_product(callback: CallbackQuery):
     # Подтверждение пользователю
     await callback.message.edit_text(
         f"✅ Заказ #{order_id} принят!\n\n"
-        f"🛍 Товар: {product['name']}\n"
-        f"💰 Цена: {format_price(product['price'])} ₽\n\n"
+        f"🛍 {product['name']}\n"
+        f"💰 {format_price(product['price'])} ₽\n\n"
         f"⏳ Скоро с вами свяжется менеджер!\n"
         f"Ожидайте сообщения.",
         reply_markup=main_menu()
@@ -383,7 +364,7 @@ async def buy_product(callback: CallbackQuery):
 async def start_order_link(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "🔗 Заказ по ссылке\n\n"
-        "Отправьте ссылку на товар с сайта POIZON:",
+        "Отправьте ссылку на товар:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")]
         ])
@@ -393,13 +374,13 @@ async def start_order_link(callback: CallbackQuery, state: FSMContext):
 @router.message(OrderLink.waiting_for_link)
 async def process_link(message: Message, state: FSMContext):
     await state.update_data(link=message.text)
-    await message.answer("📏 Укажите размер товара:")
+    await message.answer("📏 Укажите размер:")
     await state.set_state(OrderLink.waiting_for_size)
 
 @router.message(OrderLink.waiting_for_size)
 async def process_size(message: Message, state: FSMContext):
     await state.update_data(size=message.text)
-    await message.answer("💬 Добавьте комментарий к заказу:")
+    await message.answer("💬 Добавьте комментарий:")
     await state.set_state(OrderLink.waiting_for_comment)
 
 @router.message(OrderLink.waiting_for_comment)
@@ -421,20 +402,19 @@ async def process_comment(message: Message, state: FSMContext):
     await bot.send_message(
         ADMIN_ID,
         f"🔔 НОВЫЙ ЗАКАЗ ПО ССЫЛКЕ #{order_id}\n\n"
-        f"👤 Клиент: {order_data['full_name']}\n"
-        f"📱 Username: @{order_data['username']}\n"
-        f"🆔 User ID: {order_data['user_id']}\n\n"
-        f"🔗 Ссылка: {data['link']}\n"
+        f"👤 {order_data['full_name']}\n"
+        f"📱 @{order_data['username']}\n"
+        f"🆔 {order_data['user_id']}\n\n"
+        f"🔗 {data['link']}\n"
         f"📏 Размер: {data['size']}\n"
-        f"💬 Комментарий: {message.text}"
+        f"💬 {message.text}"
     )
     
-    # Подтверждение пользователю
     await message.answer(
         f"✅ Заказ #{order_id} принят!\n\n"
         f"📏 Размер: {data['size']}\n"
         f"💬 Комментарий: {message.text}\n\n"
-        f"⏳ Менеджер рассчитает стоимость и свяжется с вами!",
+        f"⏳ Менеджер рассчитает стоимость!",
         reply_markup=main_menu()
     )
     await state.clear()
@@ -449,11 +429,10 @@ async def support(callback: CallbackQuery):
         admin_username = "admin"
     
     await callback.message.edit_text(
-        f"💬 Техническая поддержка\n\n"
-        f"📞 Свяжитесь с менеджером:\n"
-        f"👤 @{admin_username}\n\n"
-        f"⏰ Время работы: Круглосуточно\n"
-        f"⚡️ Среднее время ответа: 5 минут",
+        f"💬 Техподдержка\n\n"
+        f"📞 Менеджер: @{admin_username}\n"
+        f"⏰ Время работы: 24/7\n"
+        f"⚡️ Ответ в течение 5 минут",
         reply_markup=back_button()
     )
 
@@ -469,13 +448,13 @@ async def admin_stats(callback: CallbackQuery):
     new_orders = cursor.fetchone()[0]
     
     await callback.message.edit_text(
-        f"📊 Статистика магазина\n\n"
-        f"📦 Товаров в каталоге: {len(products_db)}\n"
-        f"🛒 Заказов всего: {total_orders}\n"
-        f"🆕 Новых заказов: {new_orders}\n"
-        f"⏱ Интервал парсера: {PARSER_DELAY}с ({PARSER_DELAY//60}м)\n"
-        f"📱 Канал: {CHANNEL_ID}\n\n"
-        f"🗄️ База данных: poizon_bot.db",
+        f"📊 Статистика POIZON LAB\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
+        f"🛒 Всего заказов: {total_orders}\n"
+        f"🆕 Новых: {new_orders}\n"
+        f"📱 Канал: {CHANNEL_ID}\n"
+        f"🔄 Парсер: Автоматический\n\n"
+        f"🗄️ База: poizon_bot.db",
         reply_markup=admin_menu()
     )
 
@@ -504,15 +483,6 @@ async def admin_orders(callback: CallbackQuery):
     
     await callback.message.edit_text(text, reply_markup=admin_menu())
 
-@router.callback_query(F.data == "parse_channel")
-async def manual_parse(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return
-    
-    await callback.answer("🔄 Обновление канала...")
-    await parse_channel()
-    await callback.answer("✅ Канал обновлен!", show_alert=True)
-
 # ===== НАВИГАЦИЯ =====
 @router.callback_query(F.data == "back_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
@@ -526,16 +496,14 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 async def main():
     dp.include_router(router)
     
-    # Запуск авто-парсера
-    asyncio.create_task(auto_parser())
-    
-    print("=" * 50)
-    print("🤖 POIZON LAB бот запущен!")
-    print(f"📱 Парсит канал: {CHANNEL_ID}")
-    print(f"⏱ Интервал парсера: {PARSER_DELAY} секунд ({PARSER_DELAY//60} минут)")
+    print("=" * 60)
+    print("🤖 POIZON LAB БОТ ЗАПУЩЕН!")
+    print(f"📱 Канал: {CHANNEL_ID}")
     print(f"📦 Товаров в базе: {len(products_db)}")
+    print(f"🔄 Парсер: АВТОМАТИЧЕСКИЙ (мгновенно)")
     print(f"🗄️ База данных: poizon_bot.db")
-    print("=" * 50)
+    print("=" * 60)
+    print("\n💡 Новые посты в канале автоматически добавляются в каталог!\n")
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
