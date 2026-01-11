@@ -2,48 +2,54 @@ import os
 import asyncio
 import re
 import sqlite3
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import Command, CommandStart
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
+# ===== КОНФИГУРАЦИЯ =====
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
 CHANNEL_ID = "@asdasdadsads123312"
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 router = Router()
-dp.include_router(router)
 
+# ===== КАТЕГОРИИ (БЕЗ БРЕНДОВ) =====
 CATEGORIES = {
-    'Обувь': ['кроссовки', 'кросс', 'ботинки', 'тапки'],
-    'Верхняя одежда': ['худи', 'толстовка', 'куртка', 'пуховик'],
-    'Одежда': ['футболка', 'майка', 'шорты', 'джинсы'],
-    'Сумки': ['сумка', 'рюкзак', 'кошелек'],
-    'Аксессуары': ['часы', 'браслет', 'кепка'],
-    'Косметика': ['крем', 'помада', 'духи'],
-    'Другое': []
+    '👟 Обувь': ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk'],
+    '🧥 Верхняя одежда': ['куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'hoodie', 'худи', 'толстовка', 'свитшот', 'кофта'],
+    '👕 Одежда': ['футболка', 'майка', 'шорты', 'джинсы', 'брюки', 'штаны', 'рубашка', 'shirt', 'pants', 'jeans', 'tshirt', 'tee', 'polo', 'свитер'],
+    '👜 Сумки': ['сумка', 'рюкзак', 'сумочка', 'клатч', 'кошелек', 'портмоне', 'bag', 'backpack', 'wallet', 'crossbody', 'messenger', 'поясная'],
+    '⌚️ Аксессуары': ['часы', 'браслет', 'цепь', 'кольцо', 'серьги', 'очки', 'кепка', 'шапка', 'перчатки', 'ремень', 'носки', 'watch', 'belt', 'cap', 'hat', 'glasses', 'chain', 'подвеска'],
+    '💄 Косметика': ['крем', 'помада', 'тушь', 'духи', 'парфюм', 'маска', 'сыворотка', 'тональ', 'пудра', 'лак', 'лосьон', 'косметика', 'perfume', 'cream', 'serum', 'lipstick', 'блеск'],
+    '🎒 Другое': []
 }
 
+# ===== БАЗА ДАННЫХ =====
 conn = sqlite3.connect('poizon_bot.db', check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS products (
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
+    name TEXT NOT NULL,
     description TEXT,
     price TEXT,
     photo TEXT,
     source TEXT,
     post_id INTEGER UNIQUE,
-    category TEXT DEFAULT 'Другое',
+    category TEXT DEFAULT '🎒 Другое',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)''')
+)
+''')
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     username TEXT,
@@ -53,193 +59,290 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
     type TEXT,
     status TEXT DEFAULT 'new',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)''')
+)
+''')
 conn.commit()
 
 products_db = []
 
+# ===== ФУНКЦИИ =====
 def detect_category(text):
-    text = text.lower()
-    for cat, words in CATEGORIES.items():
-        if cat == 'Другое':
-            continue
-        for word in words:
-            if word in text:
-                return cat
-    return 'Другое'
+    """Автоопределение категории с приоритетом"""
+    text_lower = text.lower()
+    
+    # ПРИОРИТЕТ 1: Верхняя одежда (проверяем ПЕРВОЙ)
+    for keyword in ['худи', 'hoodie', 'толстовка', 'свитшот', 'куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'кофта']:
+        if keyword in text_lower:
+            return '🧥 Верхняя одежда'
+    
+    # ПРИОРИТЕТ 2: Одежда
+    for keyword in ['футболка', 'майка', 'шорты', 'джинсы', 'брюки', 'штаны', 'рубашка', 'shirt', 'pants', 'jeans', 'tshirt', 'tee', 'polo', 'свитер']:
+        if keyword in text_lower:
+            return '👕 Одежда'
+    
+    # ПРИОРИТЕТ 3: Обувь
+    for keyword in ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk']:
+        if keyword in text_lower:
+            return '👟 Обувь'
+    
+    # ПРИОРИТЕТ 4: Сумки
+    for keyword in ['сумка', 'рюкзак', 'сумочка', 'клатч', 'кошелек', 'портмоне', 'bag', 'backpack', 'wallet', 'crossbody', 'messenger', 'поясная']:
+        if keyword in text_lower:
+            return '👜 Сумки'
+    
+    # ПРИОРИТЕТ 5: Аксессуары
+    for keyword in ['часы', 'браслет', 'цепь', 'кольцо', 'серьги', 'очки', 'кепка', 'шапка', 'перчатки', 'ремень', 'носки', 'watch', 'belt', 'cap', 'hat', 'glasses', 'chain', 'подвеска']:
+        if keyword in text_lower:
+            return '⌚️ Аксессуары'
+    
+    # ПРИОРИТЕТ 6: Косметика
+    for keyword in ['крем', 'помада', 'тушь', 'духи', 'парфюм', 'маска', 'сыворотка', 'тональ', 'пудра', 'лак', 'лосьон', 'косметика', 'perfume', 'cream', 'serum', 'lipstick', 'блеск']:
+        if keyword in text_lower:
+            return '💄 Косметика'
+    
+    return '🎒 Другое'
 
 def load_products():
     global products_db
     cursor.execute('SELECT * FROM products ORDER BY created_at DESC')
     products_db = []
-    for r in cursor.fetchall():
+    for row in cursor.fetchall():
         products_db.append({
-            'id': r[0], 'name': r[1], 'description': r[2], 'price': r[3],
-            'photo': r[4], 'source': r[5], 'post_id': r[6],
-            'category': r[7] if len(r) > 7 else 'Другое'
+            'id': row[0],
+            'name': row[1],
+            'description': row[2],
+            'price': row[3],
+            'photo': row[4],
+            'source': row[5],
+            'post_id': row[6],
+            'category': row[7] if len(row) > 7 else '🎒 Другое'
         })
+    return products_db
 
-def save_order(data):
-    cursor.execute('INSERT INTO orders (user_id, username, full_name, product, price, type) VALUES (?, ?, ?, ?, ?, ?)',
-        (data['user_id'], data['username'], data['full_name'], data['product'], data['price'], data['type']))
+def save_order(order_data):
+    cursor.execute('''INSERT INTO orders (user_id, username, full_name, product, price, type)
+                      VALUES (?, ?, ?, ?, ?, ?)''', 
+                   (order_data['user_id'], order_data['username'],
+                    order_data['full_name'], order_data['product'], 
+                    order_data['price'], order_data['type']))
     conn.commit()
     return cursor.lastrowid
 
 def format_price(price):
-    return re.sub(r'(d)(?=(d{3})+(?!d))', r'\u0001 ', str(price).replace(' ', ''))
+    price_str = str(price).replace(' ', '')
+    return re.sub(r'(d)(?=(d{3})+(?!d))', r'\u0001 ', price_str)
 
 load_products()
 
+# ===== FSM =====
 class OrderLink(StatesGroup):
     waiting_for_link = State()
     waiting_for_size = State()
     waiting_for_comment = State()
 
+# ===== КЛАВИАТУРЫ =====
 def main_menu():
-    kb = [
-        [InlineKeyboardButton(text="Каталог", callback_data="catalog")],
-        [InlineKeyboardButton(text="Заказ по ссылке", callback_data="order_link")],
-        [InlineKeyboardButton(text="Поддержка", callback_data="support")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=kb)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")],
+        [InlineKeyboardButton(text="🔗 Заказ по ссылке", callback_data="order_link")],
+        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")]
+    ])
 
 def admin_menu():
-    kb = [
-        [InlineKeyboardButton(text="Товары", callback_data="admin_products")],
-        [InlineKeyboardButton(text="Заказы", callback_data="admin_orders")],
-        [InlineKeyboardButton(text="Назад", callback_data="back_main")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=kb)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📦 Управление товарами", callback_data="admin_products")],
+        [InlineKeyboardButton(text="🛒 Заказы", callback_data="admin_orders")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="◀️ Главное", callback_data="back_main")]
+    ])
 
-def catalog_menu():
+def catalog_categories():
+    """Категории каталога"""
     kb = []
     for cat in CATEGORIES.keys():
         count = len([p for p in products_db if p.get('category') == cat])
         if count > 0:
             kb.append([InlineKeyboardButton(text=f"{cat} ({count})", callback_data=f"cat_{cat}")])
-    kb.append([InlineKeyboardButton(text="Все товары", callback_data="cat_all")])
-    kb.append([InlineKeyboardButton(text="Назад", callback_data="back_main")])
+    kb.append([InlineKeyboardButton(text="📦 Все товары", callback_data="cat_all")])
+    kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def paginate_products(products, page, category):
+def paginate_products(products, page=0, category='all'):
+    """Пагинация товаров"""
     per_page = 8
-    filtered = [p for p in products if category == 'all' or p.get('category') == category]
     start = page * per_page
     end = start + per_page
+    
+    filtered = [p for p in products if category == 'all' or p.get('category') == category]
+    page_products = filtered[start:end]
+    
     kb = []
-    for p in filtered[start:end]:
-        price_text = format_price(p['price']) + ' руб'
-        name_text = p['name'][:30]
-        btn_text = f"{price_text} | {name_text}"
-        kb.append([InlineKeyboardButton(text=btn_text, callback_data=f"product_{p['id']}")])
+    for p in page_products:
+        kb.append([InlineKeyboardButton(
+            text=f"{format_price(p['price'])} ₽ | {p['name'][:30]}",
+            callback_data=f"product_{p['id']}"
+        )])
+    
+    # Навигация
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="Назад", callback_data=f"page_{category}_{page-1}"))
-    page_text = f"{page+1}/{(len(filtered)-1)//per_page+1}"
-    nav.append(InlineKeyboardButton(text=page_text, callback_data="pageinfo"))
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"page_{category}_{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"{page+1}/{(len(filtered)-1)//per_page+1}", callback_data="pageinfo"))
     if end < len(filtered):
-        nav.append(InlineKeyboardButton(text="Далее", callback_data=f"page_{category}_{page+1}"))
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"page_{category}_{page+1}"))
+    
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="Категории", callback_data="catalog")])
+    
+    kb.append([InlineKeyboardButton(text="🔙 Категории", callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=kb), len(filtered)
 
+# ===== ПАРСЕР =====
 @router.channel_post()
 async def auto_parse(message: Message):
     try:
-        if not message.chat.username or f"@{message.chat.username}" != CHANNEL_ID:
+        channel_username = message.chat.username
+        if not channel_username or f"@{channel_username}" != CHANNEL_ID:
             return
     except:
         return
+    
     if not message.photo:
         return
+    
     text = message.caption or ""
+    
+    # Парсинг цены
     price = "Цена в ЛС"
-    m1 = re.search(r'(d[ds]+?)s*[₽руб]', text, re.IGNORECASE)
-    if m1:
-        price = m1.group(1).replace(' ', '')
+    # Вариант 1: Цена с символами (4653₽, 4 653 руб)
+    match1 = re.search(r'(d[ds]+?)s*[₽руб$RUB]', text, re.IGNORECASE)
+    if match1:
+        price = match1.group(1).replace(' ', '')
     else:
-        m2 = re.search(r'\b(d{3,})\b', text)
-        if m2:
-            price = m2.group(1)
+        # Вариант 2: "Цена: 5000"
+        match2 = re.search(r'цена[s-:]+(d[ds]+)', text, re.IGNORECASE)
+        if match2:
+            price = match2.group(1).replace(' ', '')
+        else:
+            # Вариант 3: Просто число
+            match3 = re.search(r'\b(d{3,})\b', text)
+            if match3:
+                price = match3.group(1)
+    
+    # Название
     lines = text.split('
 ')
-    title = lines[0][:60].strip() if lines else f"Товар #{message.message_id}"
+    title = lines[0][:60].strip() if lines and len(lines[0]) > 5 else text[:60].strip() or f"Товар #{message.message_id}"
+    
+    # Категория (с приоритетом)
     category = detect_category(text)
+    
     try:
-        cursor.execute('INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id, category))
+        cursor.execute('''INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                      (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, message.message_id, category))
         conn.commit()
+        
         if cursor.rowcount > 0:
             load_products()
-            msg = f"Новый товар
+            await bot.send_message(ADMIN_ID,
+                f"✅ НОВЫЙ ТОВАР!
 
 {category}
-{title}
-{format_price(price)} руб
+🛍 {title}
+💰 {format_price(price)} ₽
 
-Всего: {len(products_db)}"
-            await bot.send_message(ADMIN_ID, msg)
+📦 Всего: {len(products_db)}")
+            print(f"✅ {category} | {title} | {price}₽")
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"❌ Ошибка: {e}")
 
-@router.message(CommandStart())
+# ===== КОМАНДЫ =====
+@router.message(Command("start"))
 async def cmd_start(message: Message):
-    msg = f"Добро пожаловать в POIZON LAB!
+    await message.answer(
+        f"👋 Добро пожаловать в POIZON LAB!
 
-Товаров: {len(products_db)}
-Канал: {CHANNEL_ID}
+"
+        f"📦 Товаров: {len(products_db)}
+"
+        f"🔄 Автокаталог: {CHANNEL_ID}
 
-Выберите действие:"
-    await message.answer(msg, reply_markup=main_menu())
+"
+        f"Выберите действие:",
+        reply_markup=main_menu()
+    )
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
     if message.from_user.id != ADMIN_ID:
-        await message.answer("Доступ запрещен")
         return
+    
     cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
     new = cursor.fetchone()[0]
-    msg = f"Админ панель
+    
+    await message.answer(
+        f"🔐 Админ-панель POIZON LAB
 
-Товаров: {len(products_db)}
-Заказов: {new}"
-    await message.answer(msg, reply_markup=admin_menu())
+"
+        f"📦 Товаров: {len(products_db)}
+"
+        f"🆕 Новых заказов: {new}",
+        reply_markup=admin_menu()
+    )
 
+# ===== КАТАЛОГ =====
 @router.callback_query(F.data == "catalog")
 async def show_catalog(callback: CallbackQuery):
     if not products_db:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="back_main")]])
-        await callback.message.edit_text("Каталог пуст", reply_markup=kb)
+        await callback.message.edit_text(
+            f"📦 Каталог пуст
+
+🔄 Ждем посты из {CHANNEL_ID}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
+            ])
+        )
         return
-    msg = f"Каталог POIZON LAB
+    
+    await callback.message.edit_text(
+        f"📦 Каталог POIZON LAB
 
-Всего: {len(products_db)}
+"
+        f"Всего товаров: {len(products_db)}
 
-Выберите категорию:"
-    await callback.message.edit_text(msg, reply_markup=catalog_menu())
+"
+        f"Выберите категорию:",
+        reply_markup=catalog_categories()
+    )
 
 @router.callback_query(F.data.startswith("cat_"))
 async def show_category(callback: CallbackQuery):
-    category = callback.data[4:]
+    category = callback.data.replace("cat_", "")
     kb, total = paginate_products(products_db, 0, category)
     cat_name = category if category != 'all' else 'Все товары'
-    msg = f"{cat_name}
+    
+    await callback.message.edit_text(
+        f"📦 {cat_name}
 
-Товаров: {total}"
-    await callback.message.edit_text(msg, reply_markup=kb)
+Товаров: {total}",
+        reply_markup=kb
+    )
 
 @router.callback_query(F.data.startswith("page_"))
-async def page_handler(callback: CallbackQuery):
+async def paginate(callback: CallbackQuery):
     parts = callback.data.split("_")
     page = int(parts[-1])
     category = "_".join(parts[1:-1])
     kb, total = paginate_products(products_db, page, category)
     cat_name = category if category != 'all' else 'Все товары'
-    msg = f"{cat_name}
+    
+    await callback.message.edit_text(
+        f"📦 {cat_name}
 
-Товаров: {total}"
-    await callback.message.edit_text(msg, reply_markup=kb)
+Товаров: {total}",
+        reply_markup=kb
+    )
 
 @router.callback_query(F.data == "pageinfo")
 async def pageinfo(callback: CallbackQuery):
@@ -249,37 +352,43 @@ async def pageinfo(callback: CallbackQuery):
 async def show_product(callback: CallbackQuery):
     pid = int(callback.data.split("_")[1])
     p = next((x for x in products_db if x['id'] == pid), None)
+    
     if not p:
-        await callback.answer("Товар не найден")
+        await callback.answer("❌ Товар не найден", show_alert=True)
         return
-    msg = f"{p['name']}
+    
+    text = f"🛍 {p['name']}
 
 {p['description']}
 
-{format_price(p['price'])} руб
+💰 Цена: {format_price(p['price'])} ₽
 
-{p.get('category')}"
+📁 {p.get('category', '🎒 Другое')}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Заказать", callback_data=f"buy_{pid}")],
-        [InlineKeyboardButton(text="Каталог", callback_data="catalog")]
+        [InlineKeyboardButton(text="✅ Заказать", callback_data=f"buy_{pid}")],
+        [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")]
     ])
+    
     try:
         await callback.message.delete()
     except:
         pass
+    
     if p.get('photo'):
-        await bot.send_photo(callback.from_user.id, p['photo'], caption=msg, reply_markup=kb)
+        await bot.send_photo(callback.from_user.id, p['photo'], caption=text, reply_markup=kb)
     else:
-        await bot.send_message(callback.from_user.id, msg, reply_markup=kb)
+        await bot.send_message(callback.from_user.id, text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("buy_"))
 async def buy(callback: CallbackQuery):
     pid = int(callback.data.split("_")[1])
     p = next((x for x in products_db if x['id'] == pid), None)
+    
     if not p:
-        await callback.answer("Товар удален")
+        await callback.answer("❌ Товар удален", show_alert=True)
         return
-    data = {
+    
+    order_data = {
         'user_id': callback.from_user.id,
         'username': callback.from_user.username or "no_username",
         'full_name': callback.from_user.full_name,
@@ -287,168 +396,282 @@ async def buy(callback: CallbackQuery):
         'price': p['price'],
         'type': 'catalog'
     }
-    oid = save_order(data)
-    admin_msg = f"ЗАКАЗ #{oid}
+    
+    order_id = save_order(order_data)
+    
+    await bot.send_message(ADMIN_ID,
+        f"🔔 НОВЫЙ ЗАКАЗ #{order_id}
 
-{data['full_name']}
-@{data['username']}
+"
+        f"👤 {order_data['full_name']}
+"
+        f"📱 @{order_data['username']}
+"
+        f"🆔 {order_data['user_id']}
 
-{p['name']}
-{format_price(p['price'])} руб"
-    await bot.send_message(ADMIN_ID, admin_msg)
-    await callback.answer("Заказ оформлен!", show_alert=True)
+"
+        f"🛍 {p['name']}
+"
+        f"💰 {format_price(p['price'])} ₽")
+    
     try:
         await callback.message.delete()
     except:
         pass
-    user_msg = f"ЗАКАЗ #{oid} ОФОРМЛЕН!
+    
+    await bot.send_message(
+        callback.from_user.id,
+        f"✅ Заказ #{order_id} принят!
 
-{p['name']}
-{format_price(p['price'])} руб
+"
+        f"🛍 {p['name']}
+"
+        f"💰 {format_price(p['price'])} ₽
 
-Менеджер скоро свяжется!"
-    await bot.send_message(callback.from_user.id, user_msg, reply_markup=main_menu())
+"
+        f"⏳ Скоро с вами свяжется менеджер!",
+        reply_markup=main_menu()
+    )
+    
+    await callback.answer("✅ Заказ оформлен!", show_alert=True)
 
+# ===== АДМИН УПРАВЛЕНИЕ =====
 @router.callback_query(F.data == "admin_products")
 async def admin_products(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
+    
     kb = []
     for cat in CATEGORIES.keys():
         count = len([p for p in products_db if p.get('category') == cat])
         kb.append([InlineKeyboardButton(text=f"{cat} ({count})", callback_data=f"admincat_{cat}")])
-    kb.append([InlineKeyboardButton(text="Назад", callback_data="admin_back")])
-    await callback.message.edit_text("Управление товарами", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+    
+    await callback.message.edit_text(
+        "📦 Управление товарами
+
+Выберите категорию для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @router.callback_query(F.data.startswith("admincat_"))
 async def admin_category(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    cat = callback.data[9:]
-    prods = [p for p in products_db if p.get('category') == cat]
+    
+    category = callback.data.replace("admincat_", "")
+    products = [p for p in products_db if p.get('category') == category]
+    
     kb = []
-    for p in prods[:15]:
-        kb.append([InlineKeyboardButton(text=f"Удалить {p['name'][:25]}", callback_data=f"del_{p['id']}")])
-    kb.append([InlineKeyboardButton(text="Назад", callback_data="admin_products")])
-    msg = f"{cat} ({len(prods)})
+    for p in products[:15]:
+        kb.append([InlineKeyboardButton(text=f"❌ {p['name'][:30]}", callback_data=f"del_{p['id']}")])
+    kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_products")])
+    
+    await callback.message.edit_text(
+        f"📦 {category}
 
-Нажмите для удаления:"
-    await callback.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+"
+        f"Товаров: {len(products)}
+
+"
+        f"Нажмите ❌ для удаления:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @router.callback_query(F.data.startswith("del_"))
 async def delete_product(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
+    
     pid = int(callback.data.split("_")[1])
     cursor.execute("DELETE FROM products WHERE id=?", (pid,))
     conn.commit()
     load_products()
-    await callback.answer("Удалено!", show_alert=True)
-    await callback.message.edit_text("Товар удален", reply_markup=admin_menu())
+    
+    await callback.answer("✅ Товар удален!", show_alert=True)
+    await callback.message.edit_text(
+        "✅ Товар успешно удален из каталога!",
+        reply_markup=admin_menu()
+    )
 
 @router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
+    
     cursor.execute("SELECT COUNT(*) FROM orders WHERE status='new'")
     new = cursor.fetchone()[0]
-    msg = f"Админ панель
+    
+    await callback.message.edit_text(
+        f"🔐 Админ-панель POIZON LAB
 
-Товаров: {len(products_db)}
-Заказов: {new}"
-    await callback.message.edit_text(msg, reply_markup=admin_menu())
+"
+        f"📦 Товаров: {len(products_db)}
+"
+        f"🆕 Новых заказов: {new}",
+        reply_markup=admin_menu()
+    )
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    
+    cursor.execute("SELECT COUNT(*) FROM orders")
+    total = cursor.fetchone()[0]
+    
+    stats_text = f"📊 Статистика POIZON LAB
+
+"
+    stats_text += f"📦 Всего товаров: {len(products_db)}
+"
+    stats_text += f"🛒 Всего заказов: {total}
+"
+    stats_text += f"📱 Канал: {CHANNEL_ID}
+
+"
+    stats_text += "Товары по категориям:
+"
+    
+    for cat in CATEGORIES.keys():
+        count = len([p for p in products_db if p.get('category') == cat])
+        if count > 0:
+            stats_text += f"{cat}: {count}
+"
+    
+    await callback.message.edit_text(stats_text, reply_markup=admin_menu())
 
 @router.callback_query(F.data == "admin_orders")
 async def admin_orders(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
+    
     cursor.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 10")
     orders = cursor.fetchall()
+    
     if not orders:
-        await callback.message.edit_text("Заказов пока нет", reply_markup=admin_menu())
+        await callback.message.edit_text("📦 Заказов пока нет", reply_markup=admin_menu())
         return
-    msg = "Последние 10 заказов:
+    
+    text = "📦 Последние 10 заказов:
 
 "
     for o in orders:
-        msg += f"#{o[0]} | @{o[2]}
-{o[4][:30]}
-{o[5]}
+        text += f"🆔 #{o[0]} | @{o[2]}
+ {o[4][:30]}
+ 💰 {o[5]} | {o[7]}
 
 "
-    await callback.message.edit_text(msg, reply_markup=admin_menu())
+    
+    await callback.message.edit_text(text, reply_markup=admin_menu())
 
+# ===== ЗАКАЗ ПО ССЫЛКЕ =====
 @router.callback_query(F.data == "order_link")
 async def order_link(callback: CallbackQuery, state: FSMContext):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="back_main")]])
-    await callback.message.edit_text("Заказ по ссылке
+    await callback.message.edit_text(
+        "🔗 Заказ по ссылке
 
-Отправьте ссылку:", reply_markup=kb)
+"
+        "Отправьте ссылку на товар с сайта POIZON:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")]
+        ])
+    )
     await state.set_state(OrderLink.waiting_for_link)
 
 @router.message(OrderLink.waiting_for_link)
-async def link_handler(message: Message, state: FSMContext):
+async def link(message: Message, state: FSMContext):
     await state.update_data(link=message.text)
-    await message.answer("Укажите размер:")
+    await message.answer("📏 Укажите размер товара:")
     await state.set_state(OrderLink.waiting_for_size)
 
 @router.message(OrderLink.waiting_for_size)
-async def size_handler(message: Message, state: FSMContext):
+async def size(message: Message, state: FSMContext):
     await state.update_data(size=message.text)
-    await message.answer("Добавьте комментарий:")
+    await message.answer("💬 Добавьте комментарий к заказу:")
     await state.set_state(OrderLink.waiting_for_comment)
 
 @router.message(OrderLink.waiting_for_comment)
-async def comment_handler(message: Message, state: FSMContext):
+async def comment(message: Message, state: FSMContext):
     data = await state.get_data()
+    
     order_data = {
         'user_id': message.from_user.id,
         'username': message.from_user.username or "no_username",
         'full_name': message.from_user.full_name,
-        'product': f"По ссылке (размер {data['size']})",
+        'product': f"Заказ по ссылке (размер {data['size']})",
         'price': "Уточняется",
         'type': 'link'
     }
-    oid = save_order(order_data)
-    admin_msg = f"ЗАКАЗ ПО ССЫЛКЕ #{oid}
+    
+    order_id = save_order(order_data)
+    
+    await bot.send_message(ADMIN_ID,
+        f"🔔 НОВЫЙ ЗАКАЗ ПО ССЫЛКЕ #{order_id}
 
-{order_data['full_name']}
-@{order_data['username']}
+"
+        f"👤 {order_data['full_name']}
+"
+        f"📱 @{order_data['username']}
+"
+        f"🆔 {order_data['user_id']}
 
-{data['link']}
-Размер: {data['size']}
-{message.text}"
-    await bot.send_message(ADMIN_ID, admin_msg)
-    user_msg = f"Заказ #{oid} принят!
+"
+        f"🔗 {data['link']}
+"
+        f"📏 Размер: {data['size']}
+"
+        f"💬 Комментарий: {message.text}")
+    
+    await message.answer(
+        f"✅ Заказ #{order_id} принят!
 
-Менеджер рассчитает стоимость!"
-    await message.answer(user_msg, reply_markup=main_menu())
+"
+        f"📏 Размер: {data['size']}
+"
+        f"💬 {message.text}
+
+"
+        f"⏳ Менеджер рассчитает стоимость и свяжется с вами!",
+        reply_markup=main_menu()
+    )
     await state.clear()
 
 @router.callback_query(F.data == "support")
 async def support(callback: CallbackQuery):
     try:
-        admin = await bot.get_chat(ADMIN_ID)
-        username = admin.username or "admin"
+        admin_chat = await bot.get_chat(ADMIN_ID)
+        admin_username = admin_chat.username if admin_chat.username else "admin"
     except:
-        username = "admin"
-    msg = f"Техподдержка
+        admin_username = "admin"
+    
+    await callback.message.edit_text(
+        f"💬 Техподдержка POIZON LAB
 
-Менеджер: @{username}
-Работаем: 24/7"
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="back_main")]])
-    await callback.message.edit_text(msg, reply_markup=kb)
+"
+        f"📞 Менеджер: @{admin_username}
+"
+        f"⏰ Время работы: 24/7
+"
+        f"⚡️ Среднее время ответа: 5 минут",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
+        ])
+    )
 
 @router.callback_query(F.data == "back_main")
 async def back(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
+    await callback.message.edit_text("🏠 Главное меню:", reply_markup=main_menu())
 
+# ===== ЗАПУСК =====
 async def main():
+    dp.include_router(router)
     print("=" * 60)
-    print("БОТ ЗАПУСКАЕТСЯ...")
-    print(f"Товаров: {len(products_db)}")
-    print(f"Канал: {CHANNEL_ID}")
+    print("🤖 POIZON LAB БОТ ЗАПУЩЕН!")
+    print(f"📱 Канал: {CHANNEL_ID}")
+    print(f"📦 Товаров в базе: {len(products_db)}")
+    print(f"🔄 Парсер: АВТОМАТИЧЕСКИЙ С ПРИОРИТЕТОМ КАТЕГОРИЙ")
     print("=" * 60)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
