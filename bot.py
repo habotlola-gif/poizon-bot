@@ -229,10 +229,13 @@ async def auto_parse(message: Message):
             if match3:
                 price = match3.group(1)
     
-    # Название
+    # Название - ИСПРАВЛЕНО
     lines = text.split('
 ')
-    title = lines[0][:60].strip() if lines and len(lines[0]) > 5 else text[:60].strip() or f"Товар #{message.message_id}"
+    if lines and len(lines[0]) > 5:
+        title = lines[0][:60].strip()
+    else:
+        title = text[:60].strip() or f"Товар #{message.message_id}"
     
     # Категория (с приоритетом)
     category = detect_category(text)
