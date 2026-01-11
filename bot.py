@@ -130,7 +130,7 @@ def save_order(order_data):
 
 def format_price(price):
     price_str = str(price).replace(' ', '')
-    return re.sub(r'(d)(?=(d{3})+(?!d))', r'\u0001 ', price_str)
+    return re.sub(r'(\d)(?=(\d{3})+(?!\d))', r'\1 ', price_str)
 
 load_products()
 
@@ -215,23 +215,22 @@ async def auto_parse(message: Message):
     # Парсинг цены
     price = "Цена в ЛС"
     # Вариант 1: Цена с символами (4653₽, 4 653 руб)
-    match1 = re.search(r'(d[ds]+?)s*[₽руб$RUB]', text, re.IGNORECASE)
+    match1 = re.search(r'(\d[\d\s]+?)\s*[₽руб$RUB]', text, re.IGNORECASE)
     if match1:
         price = match1.group(1).replace(' ', '')
     else:
         # Вариант 2: "Цена: 5000"
-        match2 = re.search(r'цена[s-:]+(d[ds]+)', text, re.IGNORECASE)
+        match2 = re.search(r'цена[\s\-:]+(\d[\d\s]+)', text, re.IGNORECASE)
         if match2:
             price = match2.group(1).replace(' ', '')
         else:
             # Вариант 3: Просто число
-            match3 = re.search(r'\b(d{3,})\b', text)
+            match3 = re.search(r'\b(\d{3,})\b', text)
             if match3:
                 price = match3.group(1)
     
     # Название - ИСПРАВЛЕНО
-    lines = text.split('
-')
+    lines = text.split('\n')
     if lines and len(lines[0]) > 5:
         title = lines[0][:60].strip()
     else:
@@ -249,13 +248,7 @@ async def auto_parse(message: Message):
         if cursor.rowcount > 0:
             load_products()
             await bot.send_message(ADMIN_ID,
-                f"✅ НОВЫЙ ТОВАР!
-
-{category}
-🛍 {title}
-💰 {format_price(price)} ₽
-
-📦 Всего: {len(products_db)}")
+                f"✅ НОВЫЙ ТОВАР!\n\n{category}\n🛍 {title}\n💰 {format_price(price)} ₽\n\n📦 Всего: {len(products_db)}")
             print(f"✅ {category} | {title} | {price}₽")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
@@ -264,14 +257,9 @@ async def auto_parse(message: Message):
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
-        f"👋 Добро пожаловать в POIZON LAB!
-
-"
-        f"📦 Товаров: {len(products_db)}
-"
-        f"🔄 Автокаталог: {CHANNEL_ID}
-
-"
+        f"👋 Добро пожаловать в POIZON LAB!\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
+        f"🔄 Автокаталог: {CHANNEL_ID}\n\n"
         f"Выберите действие:",
         reply_markup=main_menu()
     )
@@ -285,11 +273,8 @@ async def cmd_admin(message: Message):
     new = cursor.fetchone()[0]
     
     await message.answer(
-        f"🔐 Админ-панель POIZON LAB
-
-"
-        f"📦 Товаров: {len(products_db)}
-"
+        f"🔐 Админ-панель POIZON LAB\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
         f"🆕 Новых заказов: {new}",
         reply_markup=admin_menu()
     )
@@ -299,9 +284,7 @@ async def cmd_admin(message: Message):
 async def show_catalog(callback: CallbackQuery):
     if not products_db:
         await callback.message.edit_text(
-            f"📦 Каталог пуст
-
-🔄 Ждем посты из {CHANNEL_ID}",
+            f"📦 Каталог пуст\n\n🔄 Ждем посты из {CHANNEL_ID}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
             ])
@@ -309,12 +292,8 @@ async def show_catalog(callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        f"📦 Каталог POIZON LAB
-
-"
-        f"Всего товаров: {len(products_db)}
-
-"
+        f"📦 Каталог POIZON LAB\n\n"
+        f"Всего товаров: {len(products_db)}\n\n"
         f"Выберите категорию:",
         reply_markup=catalog_categories()
     )
@@ -326,9 +305,7 @@ async def show_category(callback: CallbackQuery):
     cat_name = category if category != 'all' else 'Все товары'
     
     await callback.message.edit_text(
-        f"📦 {cat_name}
-
-Товаров: {total}",
+        f"📦 {cat_name}\n\nТоваров: {total}",
         reply_markup=kb
     )
 
@@ -341,9 +318,7 @@ async def paginate(callback: CallbackQuery):
     cat_name = category if category != 'all' else 'Все товары'
     
     await callback.message.edit_text(
-        f"📦 {cat_name}
-
-Товаров: {total}",
+        f"📦 {cat_name}\n\nТоваров: {total}",
         reply_markup=kb
     )
 
@@ -360,13 +335,7 @@ async def show_product(callback: CallbackQuery):
         await callback.answer("❌ Товар не найден", show_alert=True)
         return
     
-    text = f"🛍 {p['name']}
-
-{p['description']}
-
-💰 Цена: {format_price(p['price'])} ₽
-
-📁 {p.get('category', '🎒 Другое')}"
+    text = f"🛍 {p['name']}\n\n{p['description']}\n\n💰 Цена: {format_price(p['price'])} ₽\n\n📁 {p.get('category', '🎒 Другое')}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Заказать", callback_data=f"buy_{pid}")],
         [InlineKeyboardButton(text="📦 Каталог", callback_data="catalog")]
@@ -403,18 +372,11 @@ async def buy(callback: CallbackQuery):
     order_id = save_order(order_data)
     
     await bot.send_message(ADMIN_ID,
-        f"🔔 НОВЫЙ ЗАКАЗ #{order_id}
-
-"
-        f"👤 {order_data['full_name']}
-"
-        f"📱 @{order_data['username']}
-"
-        f"🆔 {order_data['user_id']}
-
-"
-        f"🛍 {p['name']}
-"
+        f"🔔 НОВЫЙ ЗАКАЗ #{order_id}\n\n"
+        f"👤 {order_data['full_name']}\n"
+        f"📱 @{order_data['username']}\n"
+        f"🆔 {order_data['user_id']}\n\n"
+        f"🛍 {p['name']}\n"
         f"💰 {format_price(p['price'])} ₽")
     
     try:
@@ -424,14 +386,9 @@ async def buy(callback: CallbackQuery):
     
     await bot.send_message(
         callback.from_user.id,
-        f"✅ Заказ #{order_id} принят!
-
-"
-        f"🛍 {p['name']}
-"
-        f"💰 {format_price(p['price'])} ₽
-
-"
+        f"✅ Заказ #{order_id} принят!\n\n"
+        f"🛍 {p['name']}\n"
+        f"💰 {format_price(p['price'])} ₽\n\n"
         f"⏳ Скоро с вами свяжется менеджер!",
         reply_markup=main_menu()
     )
@@ -451,9 +408,7 @@ async def admin_products(callback: CallbackQuery):
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
     
     await callback.message.edit_text(
-        "📦 Управление товарами
-
-Выберите категорию для редактирования:",
+        "📦 Управление товарами\n\nВыберите категорию для редактирования:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -471,12 +426,8 @@ async def admin_category(callback: CallbackQuery):
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_products")])
     
     await callback.message.edit_text(
-        f"📦 {category}
-
-"
-        f"Товаров: {len(products)}
-
-"
+        f"📦 {category}\n\n"
+        f"Товаров: {len(products)}\n\n"
         f"Нажмите ❌ для удаления:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
@@ -506,11 +457,8 @@ async def admin_back(callback: CallbackQuery):
     new = cursor.fetchone()[0]
     
     await callback.message.edit_text(
-        f"🔐 Админ-панель POIZON LAB
-
-"
-        f"📦 Товаров: {len(products_db)}
-"
+        f"🔐 Админ-панель POIZON LAB\n\n"
+        f"📦 Товаров: {len(products_db)}\n"
         f"🆕 Новых заказов: {new}",
         reply_markup=admin_menu()
     )
@@ -523,24 +471,16 @@ async def admin_stats(callback: CallbackQuery):
     cursor.execute("SELECT COUNT(*) FROM orders")
     total = cursor.fetchone()[0]
     
-    stats_text = f"📊 Статистика POIZON LAB
-
-"
-    stats_text += f"📦 Всего товаров: {len(products_db)}
-"
-    stats_text += f"🛒 Всего заказов: {total}
-"
-    stats_text += f"📱 Канал: {CHANNEL_ID}
-
-"
-    stats_text += "Товары по категориям:
-"
+    stats_text = f"📊 Статистика POIZON LAB\n\n"
+    stats_text += f"📦 Всего товаров: {len(products_db)}\n"
+    stats_text += f"🛒 Всего заказов: {total}\n"
+    stats_text += f"📱 Канал: {CHANNEL_ID}\n\n"
+    stats_text += "Товары по категориям:\n"
     
     for cat in CATEGORIES.keys():
         count = len([p for p in products_db if p.get('category') == cat])
         if count > 0:
-            stats_text += f"{cat}: {count}
-"
+            stats_text += f"{cat}: {count}\n"
     
     await callback.message.edit_text(stats_text, reply_markup=admin_menu())
 
@@ -556,15 +496,9 @@ async def admin_orders(callback: CallbackQuery):
         await callback.message.edit_text("📦 Заказов пока нет", reply_markup=admin_menu())
         return
     
-    text = "📦 Последние 10 заказов:
-
-"
+    text = "📦 Последние 10 заказов:\n\n"
     for o in orders:
-        text += f"🆔 #{o[0]} | @{o[2]}
- {o[4][:30]}
- 💰 {o[5]} | {o[7]}
-
-"
+        text += f"🆔 #{o[0]} | @{o[2]}\n {o[4][:30]}\n 💰 {o[5]} | {o[7]}\n\n"
     
     await callback.message.edit_text(text, reply_markup=admin_menu())
 
@@ -572,9 +506,7 @@ async def admin_orders(callback: CallbackQuery):
 @router.callback_query(F.data == "order_link")
 async def order_link(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "🔗 Заказ по ссылке
-
-"
+        "🔗 Заказ по ссылке\n\n"
         "Отправьте ссылку на товар с сайта POIZON:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="back_main")]
@@ -610,31 +542,18 @@ async def comment(message: Message, state: FSMContext):
     order_id = save_order(order_data)
     
     await bot.send_message(ADMIN_ID,
-        f"🔔 НОВЫЙ ЗАКАЗ ПО ССЫЛКЕ #{order_id}
-
-"
-        f"👤 {order_data['full_name']}
-"
-        f"📱 @{order_data['username']}
-"
-        f"🆔 {order_data['user_id']}
-
-"
-        f"🔗 {data['link']}
-"
-        f"📏 Размер: {data['size']}
-"
+        f"🔔 НОВЫЙ ЗАКАЗ ПО ССЫЛКЕ #{order_id}\n\n"
+        f"👤 {order_data['full_name']}\n"
+        f"📱 @{order_data['username']}\n"
+        f"🆔 {order_data['user_id']}\n\n"
+        f"🔗 {data['link']}\n"
+        f"📏 Размер: {data['size']}\n"
         f"💬 Комментарий: {message.text}")
     
     await message.answer(
-        f"✅ Заказ #{order_id} принят!
-
-"
-        f"📏 Размер: {data['size']}
-"
-        f"💬 {message.text}
-
-"
+        f"✅ Заказ #{order_id} принят!\n\n"
+        f"📏 Размер: {data['size']}\n"
+        f"💬 {message.text}\n\n"
         f"⏳ Менеджер рассчитает стоимость и свяжется с вами!",
         reply_markup=main_menu()
     )
@@ -649,13 +568,9 @@ async def support(callback: CallbackQuery):
         admin_username = "admin"
     
     await callback.message.edit_text(
-        f"💬 Техподдержка POIZON LAB
-
-"
-        f"📞 Менеджер: @{admin_username}
-"
-        f"⏰ Время работы: 24/7
-"
+        f"💬 Техподдержка POIZON LAB\n\n"
+        f"📞 Менеджер: @{admin_username}\n"
+        f"⏰ Время работы: 24/7\n"
         f"⚡️ Среднее время ответа: 5 минут",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]
