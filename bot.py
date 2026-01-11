@@ -12,14 +12,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ===== КОНФИГУРАЦИЯ =====
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
-CHANNEL_ID = "@asdasdadsads123312"
+CHANNEL_ID = "@poizonlab2"  # НОВЫЙ КАНАЛ
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 
-# ===== КАТЕГОРИИ (БЕЗ БРЕНДОВ) =====
+# ===== КАТЕГОРИИ =====
 CATEGORIES = {
     '👟 Обувь': ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk'],
     '🧥 Верхняя одежда': ['куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'hoodie', 'худи', 'толстовка', 'свитшот', 'кофта'],
@@ -67,35 +67,29 @@ products_db = []
 
 # ===== ФУНКЦИИ =====
 def detect_category(text):
-    """Автоопределение категории с приоритетом"""
+    """Автоопределение категории"""
     text_lower = text.lower()
     
-    # ПРИОРИТЕТ 1: Верхняя одежда (проверяем ПЕРВОЙ)
     for keyword in ['худи', 'hoodie', 'толстовка', 'свитшот', 'куртка', 'пуховик', 'пальто', 'парка', 'ветровка', 'бомбер', 'jacket', 'coat', 'кофта']:
         if keyword in text_lower:
             return '🧥 Верхняя одежда'
     
-    # ПРИОРИТЕТ 2: Одежда
     for keyword in ['футболка', 'майка', 'шорты', 'джинсы', 'брюки', 'штаны', 'рубашка', 'shirt', 'pants', 'jeans', 'tshirt', 'tee', 'polo', 'свитер']:
         if keyword in text_lower:
             return '👕 Одежда'
     
-    # ПРИОРИТЕТ 3: Обувь
     for keyword in ['кроссовки', 'кросс', 'ботинки', 'тапки', 'сланцы', 'slides', 'туфли', 'boots', 'sneakers', 'air force', 'dunk']:
         if keyword in text_lower:
             return '👟 Обувь'
     
-    # ПРИОРИТЕТ 4: Сумки
     for keyword in ['сумка', 'рюкзак', 'сумочка', 'клатч', 'кошелек', 'портмоне', 'bag', 'backpack', 'wallet', 'crossbody', 'messenger', 'поясная']:
         if keyword in text_lower:
             return '👜 Сумки'
     
-    # ПРИОРИТЕТ 5: Аксессуары
     for keyword in ['часы', 'браслет', 'цепь', 'кольцо', 'серьги', 'очки', 'кепка', 'шапка', 'перчатки', 'ремень', 'носки', 'watch', 'belt', 'cap', 'hat', 'glasses', 'chain', 'подвеска']:
         if keyword in text_lower:
             return '⌚️ Аксессуары'
     
-    # ПРИОРИТЕТ 6: Косметика
     for keyword in ['крем', 'помада', 'тушь', 'духи', 'парфюм', 'маска', 'сыворотка', 'тональ', 'пудра', 'лак', 'лосьон', 'косметика', 'perfume', 'cream', 'serum', 'lipstick', 'блеск']:
         if keyword in text_lower:
             return '💄 Косметика'
@@ -132,6 +126,34 @@ def format_price(price):
     price_str = str(price).replace(' ', '')
     return re.sub(r'(\d)(?=(\d{3})+(?!\d))', r'\1 ', price_str)
 
+def parse_product_data(text, message_id):
+    """Универсальная функция парсинга товара"""
+    # Парсинг цены
+    price = "Цена в ЛС"
+    match1 = re.search(r'(\d[\d\s]+?)\s*[₽руб$RUB]', text, re.IGNORECASE)
+    if match1:
+        price = match1.group(1).replace(' ', '')
+    else:
+        match2 = re.search(r'цена[\s\-:]+(\d[\d\s]+)', text, re.IGNORECASE)
+        if match2:
+            price = match2.group(1).replace(' ', '')
+        else:
+            match3 = re.search(r'\b(\d{3,})\b', text)
+            if match3:
+                price = match3.group(1)
+    
+    # Название
+    lines = text.split('\n')
+    if lines and len(lines[0]) > 5:
+        title = lines[0][:60].strip()
+    else:
+        title = text[:60].strip() or f"Товар #{message_id}"
+    
+    # Категория
+    category = detect_category(text)
+    
+    return title, price, category
+
 load_products()
 
 # ===== FSM =====
@@ -157,7 +179,6 @@ def admin_menu():
     ])
 
 def catalog_categories():
-    """Категории каталога"""
     kb = []
     for cat in CATEGORIES.keys():
         count = len([p for p in products_db if p.get('category') == cat])
@@ -168,7 +189,6 @@ def catalog_categories():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def paginate_products(products, page=0, category='all'):
-    """Пагинация товаров"""
     per_page = 8
     start = page * per_page
     end = start + per_page
@@ -183,7 +203,6 @@ def paginate_products(products, page=0, category='all'):
             callback_data=f"product_{p['id']}"
         )])
     
-    # Навигация
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"page_{category}_{page-1}"))
@@ -197,7 +216,7 @@ def paginate_products(products, page=0, category='all'):
     kb.append([InlineKeyboardButton(text="🔙 Категории", callback_data="catalog")])
     return InlineKeyboardMarkup(inline_keyboard=kb), len(filtered)
 
-# ===== ПАРСЕР =====
+# ===== АВТОПАРСЕР НОВЫХ ПОСТОВ =====
 @router.channel_post()
 async def auto_parse(message: Message):
     try:
@@ -211,33 +230,7 @@ async def auto_parse(message: Message):
         return
     
     text = message.caption or ""
-    
-    # Парсинг цены
-    price = "Цена в ЛС"
-    # Вариант 1: Цена с символами (4653₽, 4 653 руб)
-    match1 = re.search(r'(\d[\d\s]+?)\s*[₽руб$RUB]', text, re.IGNORECASE)
-    if match1:
-        price = match1.group(1).replace(' ', '')
-    else:
-        # Вариант 2: "Цена: 5000"
-        match2 = re.search(r'цена[\s\-:]+(\d[\d\s]+)', text, re.IGNORECASE)
-        if match2:
-            price = match2.group(1).replace(' ', '')
-        else:
-            # Вариант 3: Просто число
-            match3 = re.search(r'\b(\d{3,})\b', text)
-            if match3:
-                price = match3.group(1)
-    
-    # Название - ИСПРАВЛЕНО
-    lines = text.split('\n')
-    if lines and len(lines[0]) > 5:
-        title = lines[0][:60].strip()
-    else:
-        title = text[:60].strip() or f"Товар #{message.message_id}"
-    
-    # Категория (с приоритетом)
-    category = detect_category(text)
+    title, price, category = parse_product_data(text, message.message_id)
     
     try:
         cursor.execute('''INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category)
@@ -253,13 +246,60 @@ async def auto_parse(message: Message):
     except Exception as e:
         print(f"❌ Ошибка: {e}")
 
+# ===== ПАРСЕР ПЕРЕСЛАННЫХ ПОСТОВ (ДЛЯ СТАРЫХ) =====
+@router.message(F.forward_from_chat)
+async def handle_forward(message: Message):
+    """Парсинг старых постов - просто перешлите их боту"""
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    # Проверяем что это из нужного канала
+    try:
+        if not message.forward_from_chat or not message.forward_from_chat.username:
+            await message.answer("❌ Неизвестный источник")
+            return
+        if f"@{message.forward_from_chat.username}" != CHANNEL_ID:
+            await message.answer(f"❌ Это не из канала {CHANNEL_ID}")
+            return
+    except:
+        return
+    
+    if not message.photo:
+        await message.answer("⚠️ Пост без фото, пропущен")
+        return
+    
+    text = message.caption or ""
+    post_id = message.forward_from_message_id or message.message_id
+    title, price, category = parse_product_data(text, post_id)
+    
+    try:
+        cursor.execute('''INSERT OR IGNORE INTO products (name, description, price, photo, source, post_id, category)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                      (title, text[:300], price, message.photo[-1].file_id, CHANNEL_ID, post_id, category))
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            load_products()
+            await message.answer(
+                f"✅ Добавлено!\n\n"
+                f"{category}\n"
+                f"🛍 {title}\n"
+                f"💰 {format_price(price)} ₽\n\n"
+                f"📦 Всего товаров: {len(products_db)}"
+            )
+        else:
+            await message.answer("⚠️ Товар уже в базе")
+            
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
 # ===== КОМАНДЫ =====
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
         f"👋 Добро пожаловать в POIZON LAB!\n\n"
         f"📦 Товаров: {len(products_db)}\n"
-        f"🔄 Автокаталог: {CHANNEL_ID}\n\n"
+        f"🔄 Канал: {CHANNEL_ID}\n\n"
         f"Выберите действие:",
         reply_markup=main_menu()
     )
@@ -277,6 +317,23 @@ async def cmd_admin(message: Message):
         f"📦 Товаров: {len(products_db)}\n"
         f"🆕 Новых заказов: {new}",
         reply_markup=admin_menu()
+    )
+
+@router.message(Command("parse"))
+async def cmd_parse_help(message: Message):
+    """Инструкция по парсингу старых постов"""
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    await message.answer(
+        f"📋 КАК ДОБАВИТЬ СТАРЫЕ ПОСТЫ:\n\n"
+        f"1️⃣ Откройте канал {CHANNEL_ID}\n"
+        f"2️⃣ Выберите нужные посты (долгий тап)\n"
+        f"3️⃣ Нажмите 'Переслать'\n"
+        f"4️⃣ Выберите этого бота\n"
+        f"5️⃣ Отправьте\n\n"
+        f"✅ Бот автоматически их распарсит и добавит!\n\n"
+        f"💡 Можно пересылать сразу по 10-20 постов"
     )
 
 # ===== КАТАЛОГ =====
@@ -408,7 +465,7 @@ async def admin_products(callback: CallbackQuery):
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
     
     await callback.message.edit_text(
-        "📦 Управление товарами\n\nВыберите категорию для редактирования:",
+        "📦 Управление товарами\n\nВыберите категорию:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -426,9 +483,7 @@ async def admin_category(callback: CallbackQuery):
     kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_products")])
     
     await callback.message.edit_text(
-        f"📦 {category}\n\n"
-        f"Товаров: {len(products)}\n\n"
-        f"Нажмите ❌ для удаления:",
+        f"📦 {category}\n\nТоваров: {len(products)}\n\nНажмите ❌ для удаления:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -589,7 +644,8 @@ async def main():
     print("🤖 POIZON LAB БОТ ЗАПУЩЕН!")
     print(f"📱 Канал: {CHANNEL_ID}")
     print(f"📦 Товаров в базе: {len(products_db)}")
-    print(f"🔄 Парсер: АВТОМАТИЧЕСКИЙ С ПРИОРИТЕТОМ КАТЕГОРИЙ")
+    print(f"🔄 Автопарсер: ВКЛ")
+    print(f"📥 Парсер старых постов: ВКЛ (пересылайте посты)")
     print("=" * 60)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
